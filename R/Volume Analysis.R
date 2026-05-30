@@ -2,7 +2,8 @@
 
 
 # Kalshi volume analysis
-
+setwd("C:/Users/Owner/Dropbox/ECU Misc/Active Working Papers/Prediction Markets/KalshiNFL/R")
+source ("Kalshi Functions.R") 
 
 # This script does some basic volume analysis on the Kalshi data
 
@@ -41,7 +42,7 @@ median (ContractsbyGame$DollarVolume)
 
 
 
-ContractsbyGame %>%
+plot <- ContractsbyGame %>%
   ggplot(aes(x = ContractVolume)) +
   geom_histogram(
     bins = 25,
@@ -62,6 +63,8 @@ ContractsbyGame %>%
     caption = "Contract volume represents the number of contracts traded"
   ) +
   theme_minimal()
+print(plot)
+SavePlotToFile(plot,"ContractsperGame")
 
 ContractsbyGame %>%
   ggplot(aes(x = DollarVolume)) +
@@ -268,7 +271,7 @@ mean (TradeTimes$InGamePct)
 median (TradeTimes$InGamePct)
 max (TradeTimes$InGamePct)
 
-TradeTimes %>%
+plot <- TradeTimes %>%
   ggplot(aes(x = InGamePct)) +
   geom_histogram(
     binwidth = 0.05,
@@ -295,3 +298,5 @@ TradeTimes %>%
     caption = str_c ("Average equals ", round (100*mean(TradeTimes$InGamePct),1),"%")
   ) +
   theme_minimal()
+print (plot)
+SavePlotToFile(plot, "In Game Trades")
