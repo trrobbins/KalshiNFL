@@ -72,9 +72,11 @@ GetFRSampleBrierScore <- function (WinProbLong, n_per_game =1){
 }
 
 
-GetFastRBrierSamples <- function ( FastRProbs, n = 1000, n_per_game =1){
+GetFastRBrierSamples <- function ( FastRProbs, n = 1000, n_per_game =1, seed = 123){
   
   # This function will get multiple samples of Brier scores
+  
+  set.seed(seed)
   
   BrierSim <- map_dfr(
     1:n,
@@ -104,11 +106,12 @@ GetFastRBrierSamples <- function ( FastRProbs, n = 1000, n_per_game =1){
 }
 
 
-PlotBrierDbn <- function (BrierSim){
+PlotBrierDbn <- function (BrierSim, Save = TRUE){
   
-   # this function will generate a comparative density plot of the Brier score distributions
+   # This function will generate a comparative density plot of the Brier score distributions
   
-  
+  myPeriods <- BrierSim$periods[1]
+  myTitle <- str_c("Distribution of Brier Scores Across Simulations - ",myPeriods)
   
   BrierMeans <- BrierSim %>%
     group_by(score_type) %>%
@@ -124,7 +127,7 @@ PlotBrierDbn <- function (BrierSim){
     pull(mean_text) %>%
     str_c(collapse = " | ")
   
-  BrierSim %>%
+  plot <- BrierSim %>%
     ggplot(aes(
       x = brier_score,
       fill = score_type,
@@ -138,7 +141,7 @@ PlotBrierDbn <- function (BrierSim){
       linewidth = 0.9
     ) +
     labs(
-      title = "Distribution of Brier Scores Across Simulations",
+      title = myTitle,
       subtitle = "Dashed vertical lines show mean Brier score for each model",
       x = "Brier Score",
       y = "Density",
@@ -152,16 +155,14 @@ PlotBrierDbn <- function (BrierSim){
       plot.caption = element_text(hjust = 0)
     )
   
-  # BrierBenchmarks <- BrierSimLong %>%
-  #   summarize(
-  #     brier_coinflip = mean((0.50 - result)^2, na.rm = TRUE),
-  #     brier_wp = mean((wp - result)^2, na.rm = TRUE),
-  #     brier_vegas_wp = mean((vegas_wp - result)^2, na.rm = TRUE)
-  #   ) %>%
-  #   mutate(
-  #     skill_wp = 1 - brier_wp / brier_coinflip,
-  #     skill_vegas_wp = 1 - brier_vegas_wp / brier_coinflip
-  #   )
+  print (plot)
+
+  if (Save == TRUE){
+    myName <- str_c ("Brier DBN -", myPeriods)
+    SavePlotToFile(plot,myName)
+  }
+  
+  return (plot)
   
 }
 
@@ -219,7 +220,10 @@ GetKalshiSampleBrierScores <- function (KalshiProbs, n_per_game =1){
   
 }
 
-GetKalshiBrierSamples <- function ( KalshiProbs, n = 1000, n_per_game =1){
+GetKalshiBrierSamples <- function ( KalshiProbs, n = 1000, n_per_game =1, seed = 123){
+  
+  
+  set.seed(seed)
   
   KalshiBrierSim <- map_dfr(
     1:n,
@@ -239,3 +243,25 @@ GetKalshiBrierSamples <- function ( KalshiProbs, n = 1000, n_per_game =1){
   return (BrierSimLong)
   
 }
+
+
+GetCombinedSims <- function (FastRSet, KalshiSet,  n= 100, n_per_game = 1 , periods =  c("Q1", "Q2", "Q3", "Q4", "OT")){
+  
+  periods_flat <- str_c(periods, collapse = ", ")
+  
+  myFastRSet <- FastRSet   %>%
+    filter(period %in% periods)
+  
+  myKalshiSet <- KalshiSet   %>%
+    filter(period %in% periods)
+  
+  
+  BrierSimFastR <- GetFastRBrierSamples(myFastRSet, n,n_per_game ) %>% mutate 
+  BrierSimKalshi <- GetKalshiBrierSamples (myKalshiSet, n, n_per_game)
+  
+  BrierSim <- rbind (BrierSimFastR, BrierSimKalshi) %>% 
+    mutate (periods = periods_flat)
+  
+  
+}
+
