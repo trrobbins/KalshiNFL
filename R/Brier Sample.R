@@ -35,7 +35,7 @@ BrierSimKalshi <- GetKalshiBrierSamples (SubKalshiWinProbs, n=500)
 
 
 
-mySampleSize <- 5000
+mySampleSize <- 10000
 AllBrierSims <- GetCombinedSims (FastRSet, KalshiWinProbs, n=mySampleSize) %>% mutate(periods = "All")
 Q1BrierSims <- GetCombinedSims (FastRSet, KalshiWinProbs, periods = c("Q1"), n=mySampleSize)
 Q2BrierSims <- GetCombinedSims (FastRSet, KalshiWinProbs, periods = c("Q2"), n=mySampleSize)
@@ -47,11 +47,12 @@ OTBrierSims <- GetCombinedSims (FastRSet, KalshiWinProbs, periods = c("OT"), n=m
 
 
 PlotBrierDbn(AllBrierSims)
-PlotBrierDbn(Q1BrierSims)
-PlotBrierDbn(Q2BrierSims)
-PlotBrierDbn(Q3BrierSims)
-PlotBrierDbn(Q4BrierSims)
-PlotBrierDbn(OTBrierSims)
+PlotBrierDbn(AllBrierSims%>% filter (score_type != "Standard WP"))
+PlotBrierDbn(Q1BrierSims %>% filter (score_type != "Standard WP"))
+PlotBrierDbn(Q2BrierSims%>% filter (score_type != "Standard WP"))
+PlotBrierDbn(Q3BrierSims%>% filter (score_type != "Standard WP"))
+PlotBrierDbn(Q4BrierSims%>% filter (score_type != "Standard WP"))
+PlotBrierDbn(OTBrierSims%>% filter (score_type != "Standard WP"))
 
 
 
@@ -194,26 +195,6 @@ ggplot(plot_data_lines, aes(x = periods, y = Brier_Score, fill = Model)) +
 #           Kalshi_Prob < .1) %>%
 #   select (game_id) %>% 
 #   distinct()
-
-GetCombinedSims <- function (FastRSet, KalshiSet,  n= 100, n_per_game = 1 , periods =  c("Q1", "Q2", "Q3", "Q4", "OT")){
-  
-  periods_flat <- str_c(periods, collapse = ", ")
-  
-  myFastRSet <- FastRSet   %>%
-    filter(period %in% periods)
-  
-  myKalshiSet <- KalshiSet   %>%
-    filter(period %in% periods)
-  
-  
-  BrierSimFastR <- GetFastRBrierSamples(myFastRSet, n,n_per_game ) %>% mutate 
-  BrierSimKalshi <- GetKalshiBrierSamples (myKalshiSet, n, n_per_game)
-  
-  BrierSim <- rbind (BrierSimFastR, BrierSimKalshi) %>% 
-    mutate (periods = periods_flat)
-  
-  
-}
 
 #AllBrierSims <- GetCombinedSims (FastRSet, KalshiWinProbs,  n=25000, n_per_game = 1, periods = "Q1")
 PlotBrierDbn(AllBrierSims)
