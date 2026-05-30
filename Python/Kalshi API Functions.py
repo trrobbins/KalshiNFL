@@ -1,8 +1,27 @@
 
 """
-This file contains a set of functions that interact with the Kalshi API to retrieve market data, place trades, and manage the user's account. 
-The functions are designed to be modular and reusable, allowing for easy integration into larger trading strategies or applications. 
+This file contains a set of functions that interact with the Kalshi API to retrieve market data, analyze NFL game tickers, and manage trade data.
+The functions are designed to be modular and reusable, allowing for easy integration into larger trading strategies or applications.
 Each function includes error handling to ensure that any issues with API requests are properly managed.
+
+Functions:
+- split_teams_blob: split compact NFL team code blobs into away/home team codes.
+- get_kalshi_series_df: retrieve all markets for a Kalshi series and return a sorted DataFrame.
+- series_exists: check whether a Kalshi series exists via the API.
+- get_markets_by_series: fetch raw market records for a series and normalize them into a DataFrame.
+- get_nfl_games_df: wrapper to retrieve open NFL game markets.
+- get_cfb_games_df: wrapper to retrieve open college football game markets.
+- get_mlb_games_df: wrapper to retrieve open MLB game markets.
+- get_nba_games_df: wrapper to retrieve open NBA game markets.
+- get_clean_nfl_games: fetch and enrich NFL market data with parsed ticker metadata.
+- get_market_quotes: fetch the latest quote for a single market ticker.
+- get_market_orderbook: retrieve and normalize the order book for a market.
+- plot_market_impact: plot a market impact curve from an order book snapshot.
+- get_trades: fetch historical trades for a ticker between two datetimes.
+- parse_kxnflgame_ticker: parse an NFL market ticker into structured metadata.
+- GetUnsavedTrades: retrieve recent trades for a ticker and optionally save them to CSV.
+- LoadMissingNFLTrades: identify settled NFL games missing saved trade files and download them.
+- _to_unix_utc: convert a datetime or ISO string to a Unix UTC timestamp.
 
 """
 
@@ -103,6 +122,20 @@ def series_exists(series_ticker: str) -> bool:
     return r.status_code == 200
 
 def get_markets_by_series(series_ticker: str, limit=500):
+    """Fetch all markets for a Kalshi series and return them as a normalized DataFrame.
+
+    Parameters
+    ----------
+    series_ticker : str
+        The Kalshi series ticker to query (for example, "KXNFLGAME").
+    limit : int, optional
+        The maximum number of markets to request per API page, by default 500.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Normalized market records for the requested series.
+    """
     params = {"series_ticker": series_ticker, "limit": str(limit)}
     markets, cursor = [], None
     while True:
@@ -231,13 +264,6 @@ def get_market_orderbook(ticker: str, depth: int = 10) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
-
 def plot_market_impact(ticker: str, book_action: str = "ASK", side: str = "YES", depth: int = 10):
     """
     Get a Kalshi order book and plot the market impact curve.
@@ -262,6 +288,9 @@ def plot_market_impact(ticker: str, book_action: str = "ASK", side: str = "YES",
     fig, ax, impact
         Matplotlib figure, axes, and dataframe used for the plot.
     """
+
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
 
     book_action = book_action.upper()
     side = side.upper()
@@ -472,10 +501,6 @@ def parse_kxnflgame_ticker(ticker: str):
         "Matchup": matchup
     }
 
-    import os
-import pandas as pd
-from datetime import datetime, timezone
-
 
 def GetUnsavedTrades(
     tkr: str,
@@ -499,6 +524,8 @@ def GetUnsavedTrades(
     pandas.DataFrame
         A DataFrame of raw trades retrieved via get_trades().
     """
+    import os
+
     # --- Time window: last 180 days ---
     end = pd.Timestamp.now(tz="UTC")
     start = end - pd.Timedelta(days=180)
@@ -531,7 +558,6 @@ def LoadMissingNFLTrades():
         If no errors occur, returns an empty DataFrame.
     """
     import os
-    import pandas as pd
 
     # 1. Get settled games
     settled_games = get_clean_nfl_games(status="settled")  # Games where contracts have settled
@@ -564,8 +590,6 @@ def LoadMissingNFLTrades():
     errors_df = pd.DataFrame(error_log, columns=["Ticker", "Error"])
     return errors_df
 
-
-from datetime import datetime, timezone
 
 def _to_unix_utc(dt) -> int:
     if isinstance(dt, str):
