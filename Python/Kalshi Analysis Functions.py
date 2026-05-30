@@ -158,13 +158,6 @@ import numpy as np
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
-def _to_unix_utc(dt: datetime) -> int:
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    else:
-        dt = dt.astimezone(timezone.utc)
-    return int(dt.timestamp())
-
 
 
 def fix_single_missing_timestamp(df: pd.DataFrame, col: str = "created_time") -> pd.DataFrame:
