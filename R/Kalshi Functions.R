@@ -14,6 +14,9 @@ library(moments)
 connection <- odbcConnect("sqlserver")
 db <- "NFLPrediction"
 
+source ("Basic Utility Functions.R") 
+
+
 UseSQLdb <- function (db = "NFLPrediction"){
   
   # This function will execute a USE command to specify what data base
@@ -436,7 +439,7 @@ PlotCalibration <- function (bin_summary, source){
 
 
 
-PlotFastRWinProb <- function (pbp, game_id, team= "Home"){
+PlotFastRWinProb <- function (pbp, game_id, team= "Home", Save = TRUE){
   
   
   # This function will plot the two win probabilities calculated in the NFLFastR 
@@ -467,24 +470,7 @@ PlotFastRWinProb <- function (pbp, game_id, team= "Home"){
   myTitle <- str_c (myTeam , " - NFLFastR In Game Win Probability" )
   mySub <- str_replace_all (mypbp$game_id[1], "_", " ")
   
-  # mypbp %>%
-  #   filter (game_id == myGame ) %>%
-  #   ggplot(aes(x = play_time_et)) +
-  #   geom_line(aes(y = WP, color = "WP"), linewidth = 1) +
-  #   geom_line(aes(y = VegasWP, color = "Vegas WP"), linewidth = 1) +
-  #   scale_y_continuous(
-  #     limits = c(0, 1),
-  #     labels = scales::percent
-  #   ) +
-  #   labs(
-  #     title = myTitle,
-  #     subtitle = mySub,
-  #     x = "Play Time (ET)",
-  #     y = "Win Probability",
-  #     color = NULL
-  #   ) +
-  #   theme_minimal(base_size = 13)
-  
+
   mypbplong <- mypbp %>%
     select(game_id, play_time_et, WP, VegasWP) %>%
     rename(
@@ -497,7 +483,7 @@ PlotFastRWinProb <- function (pbp, game_id, team= "Home"){
       values_to = "wp"
     )
   
-  mypbplong %>%
+  plot <- mypbplong %>%
     filter (game_id == myGame ) %>%
     ggplot(aes(
       x = play_time_et,
@@ -547,6 +533,11 @@ PlotFastRWinProb <- function (pbp, game_id, team= "Home"){
       plot.subtitle = element_text(color = "gray40"),
       legend.position = "bottom"
     )
+  print (plot)
+  
+  if (Save == TRUE){
+    SavePlotToFile(plot,"FastR Win Prob Compare")
+  }
 }
 
 UpdateGamedb <- function (){
@@ -685,7 +676,7 @@ PlotKalshiTeamProbs <- function (pbpsummary, mygame, Team = "Home", PlotLive = T
 
 
 
-GenGameBetVolAreaGraph <- function (GamePrices, pbp, bydollar = TRUE){
+GenGameBetVolAreaGraph <- function (GamePrices, pbp, bydollar = TRUE, Save = TRUE){
   
   # This function will generate an area graph that shows cummualtive
   # trade volume for a game, colored by pre and in game trades
@@ -790,6 +781,10 @@ GenGameBetVolAreaGraph <- function (GamePrices, pbp, bydollar = TRUE){
     }
     
   print (plot)
+  if (Save == TRUE){
+    SavePlotToFile(plot ,"CumVolTiming")
+  }
+
   return (plot)
   
 }
