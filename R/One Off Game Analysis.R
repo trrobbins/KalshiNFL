@@ -41,6 +41,7 @@ PlotKalshiTeamProbs(pbpsummary,myKgameid, Team = "Home", PlotLive = TRUE,  MA=FA
 
 
 PlotFastRWinProb (pbpsummary, "2025_07_NYG_DEN", team= "Home")
+PlotFastRWinProb (pbpsummary, "2025_17_NE_NYJ", team= "Home")
 ########################
 
 #Kalshi
