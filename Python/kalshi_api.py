@@ -25,23 +25,10 @@ Functions:
 import requests
 import pandas as pd
 from datetime import datetime, timezone
-import importlib.util
-from pathlib import Path
+from kalshi_analysis import fix_single_missing_timestamp, parse_kxnflgame_ticker
 
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-_ANALYSIS_MODULE = None
-
-
-def _get_analysis_module():
-    global _ANALYSIS_MODULE
-    if _ANALYSIS_MODULE is None:
-        path = Path(__file__).with_name("Kalshi Analysis Functions.py")
-        spec = importlib.util.spec_from_file_location("kalshi_analysis_functions", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _ANALYSIS_MODULE = module
-    return _ANALYSIS_MODULE
 
 def get_kalshi_series_df(series_ticker="KXNFLGAME", status="open", limit=200):
     """
@@ -157,7 +144,7 @@ def get_clean_nfl_games(status="open", limit=200):
         print(f"No NFL markets returned for status='{status}'.")
         return raw_df
 
-    parsed_df = raw_df["Ticker"].apply(_get_analysis_module().parse_kxnflgame_ticker).apply(pd.Series)
+    parsed_df = raw_df["Ticker"].apply(parse_kxnflgame_ticker).apply(pd.Series)
     clean_df = pd.concat([raw_df, parsed_df], axis=1)
 
     # future tweak point:
@@ -282,7 +269,7 @@ def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1
     # Fix the single NaT, if there is exactly one
     if df["created_time"].isna().any():
         print(f"⚠️ {df['created_time'].isna().sum()} unparseable timestamps in trades for {ticker}")
-        df = _get_analysis_module().fix_single_missing_timestamp(df, col="created_time")
+        df = fix_single_missing_timestamp(df, col="created_time")
 
     # Numeric columns
     for col in ["yes_price_dollars", "no_price_dollars"]:

@@ -1,21 +1,6 @@
 import plotly.graph_objects as go
 import pandas as pd
-import importlib.util
-from pathlib import Path
-
-
-_API_MODULE = None
-
-
-def _get_api_module():
-    global _API_MODULE
-    if _API_MODULE is None:
-        path = Path(__file__).with_name("Kalshi API Functions.py")
-        spec = importlib.util.spec_from_file_location("kalshi_api_functions", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _API_MODULE = module
-    return _API_MODULE
+from kalshi_api import get_market_orderbook
 
 
 def plot_market_impact(ticker: str, book_action: str = "ASK", side: str = "YES", depth: int = 10):
@@ -56,7 +41,7 @@ def plot_market_impact(ticker: str, book_action: str = "ASK", side: str = "YES",
         raise ValueError('side must be either "YES" or "NO"')
 
     # Get real-time order book
-    book = _get_api_module().get_market_orderbook(ticker, depth=depth)
+    book = get_market_orderbook(ticker, depth=depth)
 
     impact = (
         book
