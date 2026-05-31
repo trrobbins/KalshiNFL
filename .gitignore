@@ -4,6 +4,8 @@
 .RDataTmp
 .Ruserdata
 .positai
+__pycache__/
+*.pyc
 *.csv
 *.png
 .venv/
