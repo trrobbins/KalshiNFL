@@ -5,7 +5,6 @@ The functions are designed to be modular and reusable, allowing for easy integra
 Each function includes error handling to ensure that any issues with API requests are properly managed.
 
 Functions:
-- split_teams_blob: split compact NFL team code blobs into away/home team codes.
 - get_kalshi_series_df: retrieve all markets for a Kalshi series and return a sorted DataFrame.
 - series_exists: check whether a Kalshi series exists via the API.
 - get_markets_by_series: fetch raw market records for a series and normalize them into a DataFrame.
@@ -16,9 +15,7 @@ Functions:
 - get_clean_nfl_games: fetch and enrich NFL market data with parsed ticker metadata.
 - get_market_quotes: fetch the latest quote for a single market ticker.
 - get_market_orderbook: retrieve and normalize the order book for a market.
-- plot_market_impact: plot a market impact curve from an order book snapshot.
 - get_trades: fetch historical trades for a ticker between two datetimes.
-- parse_kxnflgame_ticker: parse an NFL market ticker into structured metadata.
 - GetUnsavedTrades: retrieve recent trades for a ticker and optionally save them to CSV.
 - LoadMissingNFLTrades: identify settled NFL games missing saved trade files and download them.
 - _to_unix_utc: convert a datetime or ISO string to a Unix UTC timestamp.
@@ -28,40 +25,23 @@ Functions:
 import requests
 import pandas as pd
 from datetime import datetime, timezone
-import re
+import importlib.util
+from pathlib import Path
 
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-
-# Map team codes to readable names.
-TEAM_MAP = {
-    "ARI":"Cardinals","ATL":"Falcons","BAL":"Ravens","BUF":"Bills","CAR":"Panthers","CHI":"Bears",
-    "CIN":"Bengals","CLE":"Browns","DAL":"Cowboys","DEN":"Broncos","DET":"Lions","GB":"Packers",
-    "HOU":"Texans","IND":"Colts","JAX":"Jaguars","JAC":"Jaguars","KC":"Chiefs",
-    "LAC":"Chargers","LA":"Los Angeles","LAR":"Rams","LV":"Raiders",
-    "MIA":"Dolphins","MIN":"Vikings","NE":"Patriots","NO":"Saints",
-    "NYG":"Giants","NYJ":"Jets","PHI":"Eagles","PIT":"Steelers",
-    "SEA":"Seahawks","SF":"49ers","TB":"Buccaneers","TEN":"Titans","WAS":"Commanders"
-}
+_ANALYSIS_MODULE = None
 
 
-# Allow both 2-letter and 3-letter codes.
-# We'll try to match longer codes first to avoid splitting "LAC" as "LA" + "C".
-VALID_CODES = sorted(TEAM_MAP.keys(), key=len, reverse=True)
-
-def split_teams_blob(blob: str):
-    """
-    Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
-
-    We try every known team code as a prefix and see if the remainder
-    is also a known code.
-    """
-    for away in VALID_CODES:
-        if blob.startswith(away):
-            home_candidate = blob[len(away):]
-            if home_candidate in VALID_CODES:
-                return away, home_candidate
-    return None, None
+def _get_analysis_module():
+    global _ANALYSIS_MODULE
+    if _ANALYSIS_MODULE is None:
+        path = Path(__file__).with_name("Kalshi Analysis Functions.py")
+        spec = importlib.util.spec_from_file_location("kalshi_analysis_functions", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _ANALYSIS_MODULE = module
+    return _ANALYSIS_MODULE
 
 def get_kalshi_series_df(series_ticker="KXNFLGAME", status="open", limit=200):
     """
@@ -177,7 +157,7 @@ def get_clean_nfl_games(status="open", limit=200):
         print(f"No NFL markets returned for status='{status}'.")
         return raw_df
 
-    parsed_df = raw_df["Ticker"].apply(parse_kxnflgame_ticker).apply(pd.Series)
+    parsed_df = raw_df["Ticker"].apply(_get_analysis_module().parse_kxnflgame_ticker).apply(pd.Series)
     clean_df = pd.concat([raw_df, parsed_df], axis=1)
 
     # future tweak point:
@@ -264,123 +244,6 @@ def get_market_orderbook(ticker: str, depth: int = 10) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def plot_market_impact(ticker: str, book_action: str = "ASK", side: str = "YES", depth: int = 10):
-    """
-    Get a Kalshi order book and plot the market impact curve.
-
-    Parameters
-    ----------
-    ticker : str
-        Kalshi market ticker.
-
-    book_action : str
-        "ASK" = buying contracts with a market order.
-        "BID" = selling contracts with a market order.
-
-    side : str
-        "YES" or "NO". Defaults to "YES".
-
-    depth : int
-        Number of order book levels to retrieve.
-
-    Returns
-    -------
-    fig, ax, impact
-        Matplotlib figure, axes, and dataframe used for the plot.
-    """
-
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
-
-    book_action = book_action.upper()
-    side = side.upper()
-
-    if book_action not in ["ASK", "BID"]:
-        raise ValueError('book_action must be either "ASK" or "BID"')
-
-    if side not in ["YES", "NO"]:
-        raise ValueError('side must be either "YES" or "NO"')
-
-    # Get real-time order book
-    book = get_market_orderbook(ticker, depth=depth)
-
-    impact = (
-        book
-        .query("Side == @side and Action == @book_action")
-        .copy()
-    )
-
-    if impact.empty:
-        raise ValueError(f"No rows found for Side = {side}, Action = {book_action}")
-
-    impact["Price"] = pd.to_numeric(impact["Price"])
-    impact["Qty"] = pd.to_numeric(impact["Qty"])
-
-    # Market buys consume asks from low to high.
-    # Market sells consume bids from high to low.
-    if book_action == "ASK":
-        impact = impact.sort_values("Price", ascending=True)
-    else:
-        impact = impact.sort_values("Price", ascending=False)
-
-    impact["CumQty"] = impact["Qty"].cumsum()
-    impact["CumCost"] = (impact["Price"] * impact["Qty"]).cumsum()
-    impact["AvgExecutionPrice"] = impact["CumCost"] / impact["CumQty"]
-
-    # Use timestamp from book if available; otherwise use current UTC time
-    if "ts_utc" in impact.columns:
-        ts_utc = pd.to_datetime(impact["ts_utc"].iloc[0], utc=True)
-    else:
-        ts_utc = pd.Timestamp.now(tz="UTC")
-
-    ts_et = ts_utc.tz_convert("America/New_York")
-    ts_label = ts_et.strftime("%Y-%m-%d %I:%M:%S %p ET")
-
-    # Step line: first price should apply from quantity 0 to first cumulative quantity
-    step_x = [0] + impact["CumQty"].iloc[:-1].tolist() + [impact["CumQty"].iloc[-1]]
-    step_y = impact["Price"].tolist() + [impact["Price"].iloc[-1]]
-
-    # Average execution price line
-    avg_x = [0] + impact["CumQty"].tolist()
-    avg_y = [impact["Price"].iloc[0]] + impact["AvgExecutionPrice"].tolist()
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    ax.step(
-        step_x,
-        step_y,
-        where="post",
-        linewidth=2,
-        label="Marginal execution price"
-    )
-
-    ax.plot(
-        avg_x,
-        avg_y,
-        linestyle="dashed",
-        linewidth=2,
-        label="Average execution price"
-    )
-
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f"{x:,.0f}"))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, pos: f"${y:,.2f}"))
-
-    ax.set_title(
-        f"{ticker} | {side} {book_action}\nOrder book snapshot: {ts_label}",
-        fontsize=14,
-        loc="left",
-        pad=15
-    )
-
-    ax.set_xlabel("Market Order Quantity")
-    ax.set_ylabel("Price")
-    ax.legend()
-    ax.grid(True, alpha=0.25)
-
-    plt.tight_layout()
-
-    return fig, ax, impact
-
 def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1000) -> pd.DataFrame:
     params = {
         "ticker": ticker,
@@ -419,7 +282,7 @@ def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1
     # Fix the single NaT, if there is exactly one
     if df["created_time"].isna().any():
         print(f"⚠️ {df['created_time'].isna().sum()} unparseable timestamps in trades for {ticker}")
-        df = fix_single_missing_timestamp(df, col="created_time")
+        df = _get_analysis_module().fix_single_missing_timestamp(df, col="created_time")
 
     # Numeric columns
     for col in ["yes_price_dollars", "no_price_dollars"]:
@@ -434,73 +297,6 @@ def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1
     # ✅ Final: always sort ascending by time, stable for ties
     df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
     return df
-
-
-
-def parse_kxnflgame_ticker(ticker: str):
-    """
-    Parse Kalshi NFL tickers like:
-      KXNFLGAME-25OCT23MINLAC-LAC
-      KXNFLGAME-25OCT26TBNO-NO
-
-    Returns dict with:
-      series
-      GameDate (YYYY-MM-DD)
-      Away, Home (team codes like MIN, LAC, TB, NO)
-      AwayName, HomeName (pretty team names)
-      Selection (code of the team this market is on, e.g. LAC)
-      SelectionName (pretty name of that team)
-      Matchup ("Vikings @ Chargers", etc.)
-    """
-
-    # Pattern:
-    #   <series>-<YY><MON><DD><teams_blob>-<sel>
-    # where teams_blob is both team codes jammed together, no delimiter.
-    m = re.fullmatch(
-        r"(KXNFLGAME)-"        # 1: series
-        r"(\d{2})"             # 2: YY
-        r"([A-Z]{3})"          # 3: MON (3-letter month)
-        r"(\d{2})"             # 4: DD
-        r"([A-Z]+)"            # 5: teams_blob (variable length, like MINLAC or TBNO)
-        r"-([A-Z]{2,3})"       # 6: selection team code
-        ,
-        ticker
-    )
-
-    if not m:
-        raise ValueError(f"Unrecognized ticker format: {ticker}")
-
-    series, yy, mon, dd, teams_blob, sel = m.groups()
-
-    # Build full date like 2025-10-23
-    month_num = datetime.strptime(mon, "%b").month  # OCT -> 10
-    year_full = 2000 + int(yy)
-    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
-
-    # Split teams blob into away/home using known NFL codes
-    away_code, home_code = split_teams_blob(teams_blob)
-
-    # Create display fields
-    away_name = TEAM_MAP.get(away_code, away_code)
-    home_name = TEAM_MAP.get(home_code, home_code)
-    sel_name  = TEAM_MAP.get(sel, sel)
-
-    matchup = None
-    if away_code and home_code:
-        matchup = f"{away_name} @ {home_name}"
-
-    return {
-        "series": series,
-        "GameDate": game_date,
-        "Away": away_code,
-        "Home": home_code,
-        "AwayName": away_name,
-        "HomeName": home_name,
-        "Selection": sel,
-        "SelectionName": sel_name,
-        "Matchup": matchup
-    }
-
 
 def GetUnsavedTrades(
     tkr: str,

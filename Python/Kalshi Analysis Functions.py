@@ -1,5 +1,105 @@
 import os
 import pandas as pd
+from datetime import datetime
+import re
+import numpy as np
+
+
+# Map team codes to readable names.
+TEAM_MAP = {
+    "ARI":"Cardinals","ATL":"Falcons","BAL":"Ravens","BUF":"Bills","CAR":"Panthers","CHI":"Bears",
+    "CIN":"Bengals","CLE":"Browns","DAL":"Cowboys","DEN":"Broncos","DET":"Lions","GB":"Packers",
+    "HOU":"Texans","IND":"Colts","JAX":"Jaguars","JAC":"Jaguars","KC":"Chiefs",
+    "LAC":"Chargers","LA":"Los Angeles","LAR":"Rams","LV":"Raiders",
+    "MIA":"Dolphins","MIN":"Vikings","NE":"Patriots","NO":"Saints",
+    "NYG":"Giants","NYJ":"Jets","PHI":"Eagles","PIT":"Steelers",
+    "SEA":"Seahawks","SF":"49ers","TB":"Buccaneers","TEN":"Titans","WAS":"Commanders"
+}
+
+
+# Allow both 2-letter and 3-letter codes.
+# We'll try to match longer codes first to avoid splitting "LAC" as "LA" + "C".
+VALID_CODES = sorted(TEAM_MAP.keys(), key=len, reverse=True)
+
+
+def split_teams_blob(blob: str):
+    """
+    Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
+
+    We try every known team code as a prefix and see if the remainder
+    is also a known code.
+    """
+    for away in VALID_CODES:
+        if blob.startswith(away):
+            home_candidate = blob[len(away):]
+            if home_candidate in VALID_CODES:
+                return away, home_candidate
+    return None, None
+
+
+def parse_kxnflgame_ticker(ticker: str):
+    """
+    Parse Kalshi NFL tickers like:
+      KXNFLGAME-25OCT23MINLAC-LAC
+      KXNFLGAME-25OCT26TBNO-NO
+
+    Returns dict with:
+      series
+      GameDate (YYYY-MM-DD)
+      Away, Home (team codes like MIN, LAC, TB, NO)
+      AwayName, HomeName (pretty team names)
+      Selection (code of the team this market is on, e.g. LAC)
+      SelectionName (pretty name of that team)
+      Matchup ("Vikings @ Chargers", etc.)
+    """
+
+    # Pattern:
+    #   <series>-<YY><MON><DD><teams_blob>-<sel>
+    # where teams_blob is both team codes jammed together, no delimiter.
+    m = re.fullmatch(
+        r"(KXNFLGAME)-"        # 1: series
+        r"(\d{2})"             # 2: YY
+        r"([A-Z]{3})"          # 3: MON (3-letter month)
+        r"(\d{2})"             # 4: DD
+        r"([A-Z]+)"            # 5: teams_blob (variable length, like MINLAC or TBNO)
+        r"-([A-Z]{2,3})"       # 6: selection team code
+        ,
+        ticker
+    )
+
+    if not m:
+        raise ValueError(f"Unrecognized ticker format: {ticker}")
+
+    series, yy, mon, dd, teams_blob, sel = m.groups()
+
+    # Build full date like 2025-10-23
+    month_num = datetime.strptime(mon, "%b").month  # OCT -> 10
+    year_full = 2000 + int(yy)
+    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
+
+    # Split teams blob into away/home using known NFL codes
+    away_code, home_code = split_teams_blob(teams_blob)
+
+    # Create display fields
+    away_name = TEAM_MAP.get(away_code, away_code)
+    home_name = TEAM_MAP.get(home_code, home_code)
+    sel_name  = TEAM_MAP.get(sel, sel)
+
+    matchup = None
+    if away_code and home_code:
+        matchup = f"{away_name} @ {home_name}"
+
+    return {
+        "series": series,
+        "GameDate": game_date,
+        "Away": away_code,
+        "Home": home_code,
+        "AwayName": away_name,
+        "HomeName": home_name,
+        "Selection": sel,
+        "SelectionName": sel_name,
+        "Matchup": matchup
+    }
 
 
 def ohlc_from_trades(
@@ -118,8 +218,6 @@ def ohlc_from_trades(
     return resampled
 
 
-import pandas as pd
-
 def analyze_trade_interarrival(filepath: str, timestamp_col: str = "created_time") -> pd.DataFrame:
     """
     Read a trade file and compute interarrival times between successive records,
@@ -150,15 +248,6 @@ def analyze_trade_interarrival(filepath: str, timestamp_col: str = "created_time
     df["interarrival"] = df[timestamp_col].diff()
 
     return df[["ticker", timestamp_col, "interarrival"]]
-
-import requests
-import pandas as pd
-from datetime import datetime, timezone
-import numpy as np
-
-BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
-
-
 
 def fix_single_missing_timestamp(df: pd.DataFrame, col: str = "created_time") -> pd.DataFrame:
     mask = df[col].isna()
