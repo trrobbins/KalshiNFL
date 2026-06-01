@@ -16,6 +16,10 @@ Functions:
 - get_market_quotes: fetch the latest quote for a single market ticker.
 - get_market_orderbook: retrieve and normalize the order book for a market.
 - get_trades: fetch historical trades for a ticker between two datetimes.
+- get_historical_markets_by_series: fetch markets from Kalshi's historical market endpoint.
+- get_historical_nfl_games_df: wrapper to retrieve historical NFL game markets.
+- get_nfl_historical_games_df: backward-compatible alias for historical NFL game markets.
+- get_historical_trades: fetch historical trades from Kalshi's historical trade endpoint.
 - GetUnsavedTrades: retrieve recent trades for a ticker and optionally save them to CSV.
 - LoadMissingNFLTrades: identify settled NFL games missing saved trade files and download them.
 - _to_unix_utc: convert a datetime or ISO string to a Unix UTC timestamp.
@@ -231,13 +235,27 @@ def get_market_orderbook(ticker: str, depth: int = 10) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1000) -> pd.DataFrame:
+def get_trades(
+    ticker: str,
+    start_dt: datetime = None,
+    end_dt: datetime = None,
+    limit: int = 1000
+) -> pd.DataFrame:
+    """
+    Fetch trades for a market ticker, optionally bounded by start/end datetimes.
+
+    If start_dt or end_dt is omitted, that timestamp bound is not sent to Kalshi.
+    """
     params = {
         "ticker": ticker,
-        "min_ts": _to_unix_utc(start_dt),
-        "max_ts": _to_unix_utc(end_dt),
         "limit": limit,
     }
+
+    if start_dt is not None:
+        params["min_ts"] = _to_unix_utc(start_dt)
+
+    if end_dt is not None:
+        params["max_ts"] = _to_unix_utc(end_dt)
 
     trades = []
     cursor = None
@@ -284,6 +302,97 @@ def get_trades(ticker: str, start_dt: datetime, end_dt: datetime, limit: int = 1
     # ✅ Final: always sort ascending by time, stable for ties
     df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
     return df
+
+
+def get_historical_markets_by_series(series_ticker: str, limit: int = 500) -> pd.DataFrame:
+    """
+    Fetch markets for a Kalshi series from the historical markets endpoint.
+
+    This is useful for older or settled markets that are no longer available from
+    the standard active-market endpoints.
+    """
+    params = {
+        "series_ticker": series_ticker,
+        "limit": str(limit),
+    }
+
+    markets = []
+    cursor = None
+    while True:
+        if cursor:
+            params["cursor"] = cursor
+
+        r = requests.get(f"{BASE_URL}/historical/markets", params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        markets.extend(data.get("markets", []))
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    return pd.json_normalize(markets)
+
+
+def get_historical_nfl_games_df(limit: int = 500) -> pd.DataFrame:
+    """Wrapper for historical NFL game markets."""
+    return get_historical_markets_by_series(series_ticker="KXNFLGAME", limit=limit)
+
+
+def get_nfl_historical_games_df(limit: int = 500) -> pd.DataFrame:
+    """Backward-compatible alias for get_historical_nfl_games_df."""
+    return get_historical_nfl_games_df(limit=limit)
+
+
+def get_historical_trades(
+    ticker: str,
+    min_ts=None,
+    max_ts=None,
+    limit: int = 1000
+) -> pd.DataFrame:
+    """
+    Fetch historical trades for a market ticker.
+
+    min_ts and max_ts may be Unix timestamps, datetime objects, or ISO datetime
+    strings. If omitted, Kalshi returns the endpoint's default time window.
+    """
+    params = {
+        "ticker": ticker,
+        "limit": str(limit),
+    }
+
+    if min_ts is not None:
+        params["min_ts"] = _optional_unix_utc(min_ts)
+
+    if max_ts is not None:
+        params["max_ts"] = _optional_unix_utc(max_ts)
+
+    trades = []
+    cursor = None
+    while True:
+        if cursor:
+            params["cursor"] = cursor
+
+        r = requests.get(f"{BASE_URL}/historical/trades", params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+
+        trades.extend(data.get("trades", []))
+        cursor = data.get("cursor")
+        if not cursor:
+            break
+
+    if not trades:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(trades)
+
+    if "created_time" in df.columns:
+        df["created_time"] = pd.to_datetime(df["created_time"], utc=True, errors="coerce")
+        df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
+
+    return df
+
 
 def GetUnsavedTrades(
     tkr: str,
@@ -384,3 +493,84 @@ def _to_unix_utc(dt) -> int:
         dt = dt.astimezone(timezone.utc)
 
     return int(dt.timestamp())
+
+
+def _optional_unix_utc(value) -> int:
+    """Convert datetimes/ISO strings to Unix UTC, while preserving timestamp inputs."""
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    return _to_unix_utc(value)
+
+def GetTradeFiles(trade_path: str = r"E:\PredMktData\TradeExports") -> pd.DataFrame:
+    """
+    Retrieve a list of all trade CSV files from a specified directory
+    and return them as a pandas DataFrame.
+
+    The function identifies files ending with '-Trades.csv', constructs
+    their full file paths, and derives a corresponding ticker name by
+    removing the '-Trades.csv' suffix.
+
+    Parameters
+    ----------
+    trade_path : str, optional
+        The directory containing trade export files.
+        Defaults to 'E:\\PredMktData\\TradeExports'.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame with the following columns:
+        - 'Filename' : the CSV filename (e.g., 'KXNFLGAME-25SEP04DALPHI-PHI-Trades.csv')
+        - 'FullPath' : the full path to the file
+        - 'Ticker'   : the ticker extracted from the filename
+                       (e.g., 'KXNFLGAME-25SEP04DALPHI-PHI')
+
+    Raises
+    ------
+    FileNotFoundError
+        If the specified trade_path directory does not exist.
+
+    Examples
+    --------
+    >>> df_trade = GetTradeFiles()
+    >>> print(df_trade.head())
+
+    >>> df_custom = GetTradeFiles(trade_path=r"D:\\MyProject\\Data\\Trades")
+    >>> print(len(df_custom))
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Validate directory existence
+    # ------------------------------------------------------------------
+    if not os.path.exists(trade_path):
+        raise FileNotFoundError(f"The directory does not exist: {trade_path}")
+
+    # ------------------------------------------------------------------
+    # 2. Collect all filenames ending with '-Trades.csv'
+    # ------------------------------------------------------------------
+    trade_files = [
+        f for f in os.listdir(trade_path)
+        if f.endswith("-Trades.csv")
+    ]
+
+    # ------------------------------------------------------------------
+    # 3. Construct DataFrame with filenames and paths
+    # ------------------------------------------------------------------
+    df_trade = pd.DataFrame({
+        "Filename": trade_files,
+        "FullPath": [os.path.join(trade_path, f) for f in trade_files]
+    })
+
+    # ------------------------------------------------------------------
+    # 4. Derive ticker name from filename
+    # ------------------------------------------------------------------
+    df_trade["Ticker"] = df_trade["Filename"].str.replace("-Trades.csv", "", regex=False)
+
+    # ------------------------------------------------------------------
+    # 5. Provide summary and return
+    # ------------------------------------------------------------------
+    print(f"Found {len(df_trade)} trade files in {trade_path}")
+    return df_trade
+
+
