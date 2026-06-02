@@ -15,7 +15,7 @@ CREATE or ALTER VIEW [dbo].[kalshi_trades_1min_vwap]
 AS
 SELECT
     kt.ticker,
-	league = SUBSTRING(kt.ticker, 3, 3),
+	kt.league,
     kt.game,
     gm.game_id,            -- NEW: from gamemap
     kt.event_date,
