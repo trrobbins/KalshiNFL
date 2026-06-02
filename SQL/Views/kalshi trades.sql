@@ -34,10 +34,13 @@ SELECT
         END,
 
     -- derived fields (all lowercase)
-	league = SUBSTRING(r.ticker, 3, 3),
+	league = CASE
+        WHEN LEFT(r.ticker, d.pos1 - 1) = 'KXNCAAFGAME' THEN 'NCAAF'
+        ELSE SUBSTRING(r.ticker, 3, 3)
+    END,
     series = LEFT(r.ticker, d.pos1 - 1),
 
-    game = LEFT(r.ticker, d.pos2 - 1),
+    game = LEFT(r.ticker, e.pos_game_end - 1),
 
     event_date = TRY_CONVERT(
                      date,
@@ -52,20 +55,26 @@ SELECT
     matchup = SUBSTRING(
                   r.ticker,
                   d.pos1 + 8,
-                  d.pos2 - (d.pos1 + 8)
+                  e.pos_game_end - (d.pos1 + 8)
               ),
 
-    contract_team = SUBSTRING(
-                        r.ticker,
-                        d.pos2 + 1,
-                        LEN(r.ticker) - d.pos2
-                    )
+    contract_team = CASE
+        WHEN d.pos2 > 0 THEN SUBSTRING(
+            r.ticker,
+            d.pos2 + 1,
+            LEN(r.ticker) - d.pos2
+        )
+        ELSE NULL
+    END
 FROM dbo.kalshi_trades_raw AS r
 CROSS APPLY (
     SELECT
         CHARINDEX('-', r.ticker) AS pos1,
         CHARINDEX('-', r.ticker, CHARINDEX('-', r.ticker) + 1) AS pos2
 ) AS d
+CROSS APPLY (
+    SELECT CASE WHEN d.pos2 > 0 THEN d.pos2 ELSE LEN(r.ticker) + 1 END AS pos_game_end
+) AS e
 CROSS APPLY (
     SELECT SUBSTRING(r.ticker, d.pos1 + 1, 7) AS datecode
 ) AS dc;
