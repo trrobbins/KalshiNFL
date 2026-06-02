@@ -22,6 +22,20 @@ TEAM_MAP = {
 VALID_CODES = sorted(TEAM_MAP.keys(), key=len, reverse=True)
 
 
+NBA_TEAM_MAP = {
+    "ATL": "Hawks", "BOS": "Celtics", "BKN": "Nets", "CHA": "Hornets",
+    "CHI": "Bulls", "CLE": "Cavaliers", "DAL": "Mavericks", "DEN": "Nuggets",
+    "DET": "Pistons", "GSW": "Warriors", "HOU": "Rockets", "IND": "Pacers",
+    "LAC": "Clippers", "LAL": "Lakers", "MEM": "Grizzlies", "MIA": "Heat",
+    "MIL": "Bucks", "MIN": "Timberwolves", "NOP": "Pelicans", "NYK": "Knicks",
+    "OKC": "Thunder", "ORL": "Magic", "PHI": "76ers", "PHX": "Suns",
+    "POR": "Trail Blazers", "SAC": "Kings", "SAS": "Spurs", "TOR": "Raptors",
+    "UTA": "Jazz", "WAS": "Wizards",
+}
+
+NBA_VALID_CODES = sorted(NBA_TEAM_MAP.keys(), key=len, reverse=True)
+
+
 def split_teams_blob(blob: str):
     """
     Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
@@ -33,6 +47,18 @@ def split_teams_blob(blob: str):
         if blob.startswith(away):
             home_candidate = blob[len(away):]
             if home_candidate in VALID_CODES:
+                return away, home_candidate
+    return None, None
+
+
+def split_nba_teams_blob(blob: str):
+    """
+    Given something like 'NYKSAS', return (away_code, home_code).
+    """
+    for away in NBA_VALID_CODES:
+        if blob.startswith(away):
+            home_candidate = blob[len(away):]
+            if home_candidate in NBA_VALID_CODES:
                 return away, home_candidate
     return None, None
 
@@ -99,6 +125,61 @@ def parse_kxnflgame_ticker(ticker: str):
         "Selection": sel,
         "SelectionName": sel_name,
         "Matchup": matchup
+    }
+
+
+def parse_kxnbagame_ticker(ticker: str):
+    """
+    Parse Kalshi NBA tickers like:
+      KXNBAGAME-26JUN03NYKSAS-SAS
+
+    Returns dict with:
+      series
+      GameDate (YYYY-MM-DD)
+      Away, Home
+      AwayName, HomeName
+      Selection, SelectionName
+      Matchup
+    """
+    m = re.fullmatch(
+        r"(KXNBAGAME)-"
+        r"(\d{2})"
+        r"([A-Z]{3})"
+        r"(\d{2})"
+        r"([A-Z]+)"
+        r"-([A-Z]{3})",
+        ticker,
+    )
+
+    if not m:
+        raise ValueError(f"Unrecognized ticker format: {ticker}")
+
+    series, yy, mon, dd, teams_blob, sel = m.groups()
+
+    month_num = datetime.strptime(mon, "%b").month
+    year_full = 2000 + int(yy)
+    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
+
+    away_code, home_code = split_nba_teams_blob(teams_blob)
+
+    away_name = NBA_TEAM_MAP.get(away_code, away_code)
+    home_name = NBA_TEAM_MAP.get(home_code, home_code)
+    sel_name = NBA_TEAM_MAP.get(sel, sel)
+
+    matchup = None
+    if away_code and home_code:
+        matchup = f"{away_name} @ {home_name}"
+
+    return {
+        "series": series,
+        "GameDate": game_date,
+        "Away": away_code,
+        "Home": home_code,
+        "AwayName": away_name,
+        "HomeName": home_name,
+        "Selection": sel,
+        "SelectionName": sel_name,
+        "Matchup": matchup,
     }
 
 
