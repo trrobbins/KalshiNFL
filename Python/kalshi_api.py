@@ -35,6 +35,7 @@ from kalshi_analysis import (
     parse_kxnflgame_ticker,
     parse_kxnbagame_ticker,
     parse_kxnhlgame_ticker,
+    parse_kxmlbgame_ticker,
 )
 
 
@@ -221,6 +222,27 @@ def get_clean_nhl_games(status="open", limit=200):
         return raw_df
 
     parsed_df = raw_df["Ticker"].apply(parse_kxnhlgame_ticker).apply(pd.Series)
+    clean_df = pd.concat([raw_df, parsed_df], axis=1)
+
+    clean_df = clean_df.sort_values(
+        ["GameDate", "Home", "Away", "Ticker"],
+        na_position="last"
+    ).reset_index(drop=True)
+
+    return clean_df
+
+
+def get_clean_mlb_games(status="open", limit=200):
+    """
+    Pull MLB markets for a given status, parse ticker metadata, and return an enriched DataFrame.
+    """
+    raw_df = get_mlb_games_df(status=status, limit=limit)
+
+    if raw_df.empty:
+        print(f"No MLB markets returned for status='{status}'.")
+        return raw_df
+
+    parsed_df = raw_df["Ticker"].apply(parse_kxmlbgame_ticker).apply(pd.Series)
     clean_df = pd.concat([raw_df, parsed_df], axis=1)
 
     clean_df = clean_df.sort_values(
@@ -567,6 +589,12 @@ def _nhl_season_from_game_date(game_date) -> int:
     return game_date.year if game_date.month >= 10 else game_date.year - 1
 
 
+def _calendar_year_season_from_game_date(game_date) -> int:
+    """Return the calendar-year season for sports played within one year."""
+    game_date = pd.to_datetime(game_date)
+    return game_date.year
+
+
 SPORT_TRADE_CONFIG = {
     "NFL": {
         "get_clean_games": get_clean_nfl_games,
@@ -579,6 +607,10 @@ SPORT_TRADE_CONFIG = {
     "NHL": {
         "get_clean_games": get_clean_nhl_games,
         "season_from_date": _nhl_season_from_game_date,
+    },
+    "MLB": {
+        "get_clean_games": get_clean_mlb_games,
+        "season_from_date": _calendar_year_season_from_game_date,
     },
 }
 
@@ -680,6 +712,14 @@ def LoadMissingNHLTrades(
 ):
     """Load missing NHL trade files for a season."""
     return LoadMissingTrades("NHL", season, base_path=base_path)
+
+
+def LoadMissingMLBTrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
+    """Load missing MLB trade files for a season."""
+    return LoadMissingTrades("MLB", season, base_path=base_path)
 
 
 def _to_unix_utc(dt) -> int:
