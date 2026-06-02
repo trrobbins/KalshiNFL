@@ -15,7 +15,7 @@ CREATE  or ALTER VIEW [dbo].[kalshi_trades_1hr_vwap]
 AS
 SELECT
     kt.ticker,
-	league = SUBSTRING(kt.ticker, 3, 3),
+	kt.league,
     kt.game,
     gm.game_id,
     kt.event_date,
@@ -59,7 +59,7 @@ LEFT JOIN dbo.gamemap AS gm
     ON kt.game = gm.game
 
 GROUP BY
-    league,
+    kt.league,
     kt.ticker,
     kt.game,
     gm.game_id,
