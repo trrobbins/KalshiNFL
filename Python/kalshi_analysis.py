@@ -71,6 +71,36 @@ MLB_TEAM_MAP = {
 MLB_VALID_CODES = sorted(MLB_TEAM_MAP.keys(), key=len, reverse=True)
 
 
+NCAAF_TEAM_MAP = {
+    "ALA": "Alabama", "APP": "Appalachian State", "ARIZ": "Arizona",
+    "ARK": "Arkansas", "ARMY": "Army", "ASU": "Arizona State",
+    "AUB": "Auburn", "BAY": "Baylor", "BC": "Boston College",
+    "BOIS": "Boise State", "BYU": "BYU", "CAL": "California",
+    "CLEM": "Clemson", "CIN": "Cincinnati", "COLO": "Colorado",
+    "DUKE": "Duke", "ECU": "East Carolina", "FLA": "Florida",
+    "FSU": "Florida State", "GT": "Georgia Tech", "HOU": "Houston",
+    "ILL": "Illinois", "IND": "Indiana", "IOWA": "Iowa",
+    "ISU": "Iowa State", "JMU": "James Madison", "KAN": "Kansas",
+    "KSU": "Kansas State", "LSU": "LSU", "LOU": "Louisville",
+    "MICH": "Michigan", "MINN": "Minnesota", "MISS": "Ole Miss",
+    "MIZ": "Missouri", "MSST": "Mississippi State", "NAVY": "Navy",
+    "NCST": "NC State", "NEB": "Nebraska", "ND": "Notre Dame",
+    "NW": "Northwestern", "OHIO": "Ohio", "OKLA": "Oklahoma",
+    "OKST": "Oklahoma State", "ORE": "Oregon", "OSU": "Ohio State",
+    "PSU": "Penn State", "PUR": "Purdue", "RICE": "Rice",
+    "RUTG": "Rutgers", "SC": "South Carolina", "SMU": "SMU",
+    "STAN": "Stanford", "SYR": "Syracuse", "TCU": "TCU",
+    "TENN": "Tennessee", "TEX": "Texas", "TULN": "Tulane",
+    "TTU": "Texas Tech", "UCF": "UCF", "UCLA": "UCLA",
+    "UNC": "North Carolina", "UNLV": "UNLV", "USC": "USC",
+    "USF": "South Florida", "UTAH": "Utah", "UTSA": "UTSA",
+    "UVA": "Virginia", "VT": "Virginia Tech", "WAKE": "Wake Forest",
+    "WASH": "Washington", "WISC": "Wisconsin", "WVU": "West Virginia",
+}
+
+NCAAF_VALID_CODES = sorted(NCAAF_TEAM_MAP.keys(), key=len, reverse=True)
+
+
 def split_teams_blob(blob: str):
     """
     Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
@@ -119,6 +149,27 @@ def split_mlb_teams_blob(blob: str):
             home_candidate = blob[len(away):]
             if home_candidate in MLB_VALID_CODES:
                 return away, home_candidate
+    return None, None
+
+
+def split_ncaaf_teams_blob(blob: str):
+    """
+    Given something like 'UNCTCU', return (away_code, home_code).
+
+    College team codes are less standardized than pro leagues, so known codes
+    are tried first. If both sides are unknown and the blob is an even length,
+    fall back to a symmetric split so the date and matchup are still usable.
+    """
+    for away in NCAAF_VALID_CODES:
+        if blob.startswith(away):
+            home_candidate = blob[len(away):]
+            if home_candidate in NCAAF_VALID_CODES:
+                return away, home_candidate
+
+    if len(blob) % 2 == 0:
+        mid = len(blob) // 2
+        return blob[:mid], blob[mid:]
+
     return None, None
 
 
@@ -184,6 +235,63 @@ def parse_kxnflgame_ticker(ticker: str):
         "Selection": sel,
         "SelectionName": sel_name,
         "Matchup": matchup
+    }
+
+
+def parse_kxncaafgame_ticker(ticker: str):
+    """
+    Parse Kalshi college football tickers like:
+      KXNCAAFGAME-26AUG29UNCTCU
+      KXNCAAFGAME-26AUG29UNCTCU-TCU
+
+    Returns dict with:
+      series
+      GameDate (YYYY-MM-DD)
+      Away, Home
+      AwayName, HomeName
+      Selection, SelectionName
+      Matchup
+    """
+    ticker = ticker.upper()
+    m = re.fullmatch(
+        r"(KXNCAAFGAME)-"
+        r"(\d{2})"
+        r"([A-Z]{3})"
+        r"(\d{2})"
+        r"([A-Z]+)"
+        r"(?:-([A-Z]{2,4}))?",
+        ticker,
+    )
+
+    if not m:
+        raise ValueError(f"Unrecognized ticker format: {ticker}")
+
+    series, yy, mon, dd, teams_blob, sel = m.groups()
+
+    month_num = datetime.strptime(mon, "%b").month
+    year_full = 2000 + int(yy)
+    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
+
+    away_code, home_code = split_ncaaf_teams_blob(teams_blob)
+
+    away_name = NCAAF_TEAM_MAP.get(away_code, away_code)
+    home_name = NCAAF_TEAM_MAP.get(home_code, home_code)
+    sel_name = NCAAF_TEAM_MAP.get(sel, sel)
+
+    matchup = None
+    if away_code and home_code:
+        matchup = f"{away_name} @ {home_name}"
+
+    return {
+        "series": series,
+        "GameDate": game_date,
+        "Away": away_code,
+        "Home": home_code,
+        "AwayName": away_name,
+        "HomeName": home_name,
+        "Selection": sel,
+        "SelectionName": sel_name,
+        "Matchup": matchup,
     }
 
 
