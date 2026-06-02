@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from kalshi_analysis import (
     fix_single_missing_timestamp,
     parse_kxnflgame_ticker,
+    parse_kxncaafgame_ticker,
     parse_kxnbagame_ticker,
     parse_kxnhlgame_ticker,
     parse_kxmlbgame_ticker,
@@ -181,6 +182,28 @@ def get_clean_nfl_games(status="open", limit=200):
 
     # future tweak point:
     # clean_df["YesMid"] = (clean_df["YesBid"] + clean_df["YesAsk"]) / 2
+
+    clean_df = clean_df.sort_values(
+        ["GameDate", "Home", "Away", "Ticker"],
+        na_position="last"
+    ).reset_index(drop=True)
+
+    return clean_df
+
+
+def get_clean_cfb_games(status="open", limit=200):
+    """
+    Pull college football markets for a given status, parse ticker metadata,
+    and return an enriched DataFrame.
+    """
+    raw_df = get_cfb_games_df(status=status, limit=limit)
+
+    if raw_df.empty:
+        print(f"No college football markets returned for status='{status}'.")
+        return raw_df
+
+    parsed_df = raw_df["Ticker"].apply(parse_kxncaafgame_ticker).apply(pd.Series)
+    clean_df = pd.concat([raw_df, parsed_df], axis=1)
 
     clean_df = clean_df.sort_values(
         ["GameDate", "Home", "Away", "Ticker"],
@@ -474,6 +497,11 @@ def get_historical_nfl_games_df(limit: int = 500) -> pd.DataFrame:
     return get_historical_markets_by_series(series_ticker="KXNFLGAME", limit=limit)
 
 
+def get_historical_cfb_games_df(limit: int = 500) -> pd.DataFrame:
+    """Wrapper for historical college football game markets."""
+    return get_historical_markets_by_series(series_ticker="KXNCAAFGAME", limit=limit)
+
+
 def get_nfl_historical_games_df(limit: int = 500) -> pd.DataFrame:
     """Backward-compatible alias for get_historical_nfl_games_df."""
     return get_historical_nfl_games_df(limit=limit)
@@ -600,6 +628,14 @@ SPORT_TRADE_CONFIG = {
         "get_clean_games": get_clean_nfl_games,
         "season_from_date": _nfl_season_from_game_date,
     },
+    "CFB": {
+        "get_clean_games": get_clean_cfb_games,
+        "season_from_date": _nfl_season_from_game_date,
+    },
+    "NCAAF": {
+        "get_clean_games": get_clean_cfb_games,
+        "season_from_date": _nfl_season_from_game_date,
+    },
     "NBA": {
         "get_clean_games": get_clean_nba_games,
         "season_from_date": _nba_season_from_game_date,
@@ -696,6 +732,22 @@ def LoadMissingNFLTrades(
         If no errors occur, returns an empty DataFrame.
     """
     return LoadMissingTrades("NFL", season, base_path=base_path)
+
+
+def LoadMissingCFBTrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
+    """Load missing college football trade files for a season."""
+    return LoadMissingTrades("CFB", season, base_path=base_path)
+
+
+def LoadMissingNCAAFTrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
+    """Load missing college football trade files for a season."""
+    return LoadMissingTrades("NCAAF", season, base_path=base_path)
 
 
 def LoadMissingNBATrades(
