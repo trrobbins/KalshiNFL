@@ -11,10 +11,11 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 
-CREATE VIEW [dbo].[kalshi_trades_1min_vwap]
+CREATE or ALTER VIEW [dbo].[kalshi_trades_1min_vwap]
 AS
 SELECT
     kt.ticker,
+	league = SUBSTRING(kt.ticker, 3, 3),
     kt.game,
     gm.game_id,            -- NEW: from gamemap
     kt.event_date,
@@ -41,6 +42,7 @@ LEFT JOIN dbo.gamemap AS gm
     ON kt.game = gm.game
 
 GROUP BY
+    league,
     kt.ticker,
     kt.game,
     gm.game_id,            -- NEW: must be grouped

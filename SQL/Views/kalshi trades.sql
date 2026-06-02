@@ -11,7 +11,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 
-CREATE VIEW [dbo].[kalshi_trades]
+CREATE or ALTER VIEW [dbo].[kalshi_trades]
 AS
 SELECT
     r.[count],
@@ -34,6 +34,7 @@ SELECT
         END,
 
     -- derived fields (all lowercase)
+	league = SUBSTRING(r.ticker, 3, 3),
     series = LEFT(r.ticker, d.pos1 - 1),
 
     game = LEFT(r.ticker, d.pos2 - 1),
