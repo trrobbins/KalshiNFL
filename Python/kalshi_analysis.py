@@ -36,6 +36,23 @@ NBA_TEAM_MAP = {
 NBA_VALID_CODES = sorted(NBA_TEAM_MAP.keys(), key=len, reverse=True)
 
 
+NHL_TEAM_MAP = {
+    "ANA": "Ducks", "BOS": "Bruins", "BUF": "Sabres", "CAR": "Hurricanes",
+    "CBJ": "Blue Jackets", "CGY": "Flames", "CHI": "Blackhawks",
+    "COL": "Avalanche", "DAL": "Stars", "DET": "Red Wings",
+    "EDM": "Oilers", "FLA": "Panthers", "LAK": "Kings", "MIN": "Wild",
+    "MTL": "Canadiens", "NJD": "Devils", "NSH": "Predators",
+    "NYI": "Islanders", "NYR": "Rangers", "OTT": "Senators",
+    "PHI": "Flyers", "PIT": "Penguins", "SEA": "Kraken",
+    "SJS": "Sharks", "STL": "Blues", "TBL": "Lightning",
+    "TOR": "Maple Leafs", "UTA": "Mammoth", "VAN": "Canucks",
+    "VGK": "Golden Knights", "WPG": "Jets", "WSH": "Capitals",
+    "WAS": "Capitals",
+}
+
+NHL_VALID_CODES = sorted(NHL_TEAM_MAP.keys(), key=len, reverse=True)
+
+
 def split_teams_blob(blob: str):
     """
     Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
@@ -59,6 +76,18 @@ def split_nba_teams_blob(blob: str):
         if blob.startswith(away):
             home_candidate = blob[len(away):]
             if home_candidate in NBA_VALID_CODES:
+                return away, home_candidate
+    return None, None
+
+
+def split_nhl_teams_blob(blob: str):
+    """
+    Given something like 'VGKCAR', return (away_code, home_code).
+    """
+    for away in NHL_VALID_CODES:
+        if blob.startswith(away):
+            home_candidate = blob[len(away):]
+            if home_candidate in NHL_VALID_CODES:
                 return away, home_candidate
     return None, None
 
@@ -165,6 +194,63 @@ def parse_kxnbagame_ticker(ticker: str):
     away_name = NBA_TEAM_MAP.get(away_code, away_code)
     home_name = NBA_TEAM_MAP.get(home_code, home_code)
     sel_name = NBA_TEAM_MAP.get(sel, sel)
+
+    matchup = None
+    if away_code and home_code:
+        matchup = f"{away_name} @ {home_name}"
+
+    return {
+        "series": series,
+        "GameDate": game_date,
+        "Away": away_code,
+        "Home": home_code,
+        "AwayName": away_name,
+        "HomeName": home_name,
+        "Selection": sel,
+        "SelectionName": sel_name,
+        "Matchup": matchup,
+    }
+
+
+def parse_kxnhlgame_ticker(ticker: str):
+    """
+    Parse Kalshi NHL tickers like:
+      KXNHLGAME-26JUN02VGKCAR
+      KXNHLGAME-26JUN02VGKCAR-CAR
+
+    Returns dict with:
+      series
+      GameDate (YYYY-MM-DD)
+      Away, Home
+      AwayName, HomeName
+      Selection, SelectionName
+      Matchup
+    """
+    ticker = ticker.upper()
+    m = re.fullmatch(
+        r"(KXNHLGAME)-"
+        r"(\d{2})"
+        r"([A-Z]{3})"
+        r"(\d{2})"
+        r"([A-Z]+)"
+        r"(?:-([A-Z]{2,3}))?",
+        ticker,
+    )
+
+    if not m:
+        raise ValueError(f"Unrecognized ticker format: {ticker}")
+
+    series, yy, mon, dd, teams_blob, sel = m.groups()
+
+    month_num = datetime.strptime(mon, "%b").month
+    year_full = 2000 + int(yy)
+    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
+
+    away_code, home_code = split_nhl_teams_blob(teams_blob)
+
+    away_name = NHL_TEAM_MAP.get(away_code, away_code)
+    home_name = NHL_TEAM_MAP.get(home_code, home_code)
+    sel_name = NHL_TEAM_MAP.get(sel, sel)
 
     matchup = None
     if away_code and home_code:
