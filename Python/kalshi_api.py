@@ -28,6 +28,7 @@ Functions:
 
 import requests
 import pandas as pd
+import os
 from datetime import datetime, timezone
 from kalshi_analysis import fix_single_missing_timestamp, parse_kxnflgame_ticker
 
@@ -436,9 +437,22 @@ def GetUnsavedTrades(
     return tr
 
 
-def LoadMissingNFLTrades():
+def _nfl_season_from_game_date(game_date) -> int:
+    """Return the NFL season for a game date."""
+    game_date = pd.to_datetime(game_date)
+    return game_date.year if game_date.month >= 8 else game_date.year - 1
+
+
+def LoadMissingNFLTrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
     """
-    Load trades for all settled NFL games that don't yet have a saved trade file.
+    Load trades for settled NFL games in a season that lack saved trade files.
+
+    Files are stored under a per-season subdirectory:
+    ``{base_path}\\NFL{season}``, for example
+    ``E:\\PredMktData\\TradeExports\\NFL2025``.
 
     Returns
     -------
@@ -449,22 +463,36 @@ def LoadMissingNFLTrades():
 
         If no errors occur, returns an empty DataFrame.
     """
-    import os
+    error_columns = ["Ticker", "Error"]
+    trade_path = os.path.join(base_path, f"NFL{season}")
+    os.makedirs(trade_path, exist_ok=True)
 
     # 1. Get settled games
     settled_games = get_clean_nfl_games(status="settled")  # Games where contracts have settled
-    df_settled = settled_games[["Ticker"]]
+    if settled_games.empty:
+        print(f"No settled NFL games returned for season {season}.")
+        return pd.DataFrame(columns=error_columns)
+
+    settled_games = settled_games.copy()
+    settled_games["Season"] = settled_games["GameDate"].apply(_nfl_season_from_game_date)
+    df_settled = settled_games.loc[
+        settled_games["Season"] == season,
+        ["Ticker"]
+    ]
+
+    if df_settled.empty:
+        print(f"No settled NFL games found for season {season}.")
+        return pd.DataFrame(columns=error_columns)
 
     # 2. Get list of already-downloaded trade files
-    path = r"E:\PredMktData\TradeExports"
-    trade_files = os.listdir(path)
-    print("Existing trade files:", trade_files)
-
-    df_trade = pd.DataFrame({"Filename": trade_files})
-    df_trade["Ticker"] = df_trade["Filename"].str.replace("-Trades.csv", "", regex=False)
+    df_trade = GetTradeFiles(trade_path)
 
     # 3. Find which settled games do NOT yet have a trade file
     df_load = df_settled[~df_settled["Ticker"].isin(df_trade["Ticker"])]
+
+    if df_load.empty:
+        print(f"No missing NFL trade files for season {season}.")
+        return pd.DataFrame(columns=error_columns)
 
     # 4. Loop through missing tickers and try to load trades
     error_log = []  # list of dicts: {"Ticker": ..., "Error": ...}
@@ -472,14 +500,14 @@ def LoadMissingNFLTrades():
     for ticker in df_load["Ticker"]:
         print(f"\nProcessing {ticker}...")
         try:
-            GetUnsavedTrades(ticker)
+            GetUnsavedTrades(ticker, save_path=trade_path)
         except Exception as e:
             err_msg = str(e)
             print(f"❌ Error processing {ticker}: {err_msg}")
             error_log.append({"Ticker": ticker, "Error": err_msg})
 
     # 5. Return a DataFrame of errors (or an empty one if none)
-    errors_df = pd.DataFrame(error_log, columns=["Ticker", "Error"])
+    errors_df = pd.DataFrame(error_log, columns=error_columns)
     return errors_df
 
 
@@ -554,13 +582,20 @@ def GetTradeFiles(trade_path: str = r"E:\PredMktData\TradeExports") -> pd.DataFr
         if f.endswith("-Trades.csv")
     ]
 
+    if not trade_files:
+        print(f"Found 0 trade files in {trade_path}")
+        return pd.DataFrame(columns=["Filename", "FullPath", "Ticker"])
+
     # ------------------------------------------------------------------
     # 3. Construct DataFrame with filenames and paths
     # ------------------------------------------------------------------
-    df_trade = pd.DataFrame({
-        "Filename": trade_files,
-        "FullPath": [os.path.join(trade_path, f) for f in trade_files]
-    })
+    df_trade = pd.DataFrame(
+        {
+            "Filename": trade_files,
+            "FullPath": [os.path.join(trade_path, f) for f in trade_files],
+        },
+        columns=["Filename", "FullPath"],
+    )
 
     # ------------------------------------------------------------------
     # 4. Derive ticker name from filename
