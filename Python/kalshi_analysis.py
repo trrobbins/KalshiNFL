@@ -53,6 +53,24 @@ NHL_TEAM_MAP = {
 NHL_VALID_CODES = sorted(NHL_TEAM_MAP.keys(), key=len, reverse=True)
 
 
+MLB_TEAM_MAP = {
+    "ARI": "Diamondbacks", "ATH": "Athletics", "ATL": "Braves",
+    "BAL": "Orioles", "BOS": "Red Sox", "CHC": "Cubs",
+    "CIN": "Reds", "CLE": "Guardians", "COL": "Rockies",
+    "CWS": "White Sox", "DET": "Tigers", "HOU": "Astros",
+    "KC": "Royals", "KCR": "Royals", "LAA": "Angels",
+    "LAD": "Dodgers", "MIA": "Marlins", "MIL": "Brewers",
+    "MIN": "Twins", "NYM": "Mets", "NYY": "Yankees",
+    "OAK": "Athletics", "PHI": "Phillies", "PIT": "Pirates",
+    "SD": "Padres", "SDP": "Padres", "SEA": "Mariners",
+    "SF": "Giants", "SFG": "Giants", "STL": "Cardinals",
+    "TB": "Rays", "TBR": "Rays", "TEX": "Rangers",
+    "TOR": "Blue Jays", "WAS": "Nationals", "WSH": "Nationals",
+}
+
+MLB_VALID_CODES = sorted(MLB_TEAM_MAP.keys(), key=len, reverse=True)
+
+
 def split_teams_blob(blob: str):
     """
     Given something like 'MINLAC', 'TBNO', 'JACLV', return (away_code, home_code).
@@ -88,6 +106,18 @@ def split_nhl_teams_blob(blob: str):
         if blob.startswith(away):
             home_candidate = blob[len(away):]
             if home_candidate in NHL_VALID_CODES:
+                return away, home_candidate
+    return None, None
+
+
+def split_mlb_teams_blob(blob: str):
+    """
+    Given something like 'DETTB', return (away_code, home_code).
+    """
+    for away in MLB_VALID_CODES:
+        if blob.startswith(away):
+            home_candidate = blob[len(away):]
+            if home_candidate in MLB_VALID_CODES:
                 return away, home_candidate
     return None, None
 
@@ -259,6 +289,67 @@ def parse_kxnhlgame_ticker(ticker: str):
     return {
         "series": series,
         "GameDate": game_date,
+        "Away": away_code,
+        "Home": home_code,
+        "AwayName": away_name,
+        "HomeName": home_name,
+        "Selection": sel,
+        "SelectionName": sel_name,
+        "Matchup": matchup,
+    }
+
+
+def parse_kxmlbgame_ticker(ticker: str):
+    """
+    Parse Kalshi MLB tickers like:
+      KXMLBGAME-26JUN021840DETTB
+      KXMLBGAME-26JUN021840DETTB-TB
+
+    Returns dict with:
+      series
+      GameDate (YYYY-MM-DD)
+      GameTime (HH:MM from the ticker's four-digit time block)
+      Away, Home
+      AwayName, HomeName
+      Selection, SelectionName
+      Matchup
+    """
+    ticker = ticker.upper()
+    m = re.fullmatch(
+        r"(KXMLBGAME)-"
+        r"(\d{2})"
+        r"([A-Z]{3})"
+        r"(\d{2})"
+        r"(\d{4})"
+        r"([A-Z]+)"
+        r"(?:-([A-Z]{2,3}))?",
+        ticker,
+    )
+
+    if not m:
+        raise ValueError(f"Unrecognized ticker format: {ticker}")
+
+    series, yy, mon, dd, hhmm, teams_blob, sel = m.groups()
+
+    month_num = datetime.strptime(mon, "%b").month
+    year_full = 2000 + int(yy)
+    game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
+    game_time = f"{hhmm[:2]}:{hhmm[2:]}"
+
+    away_code, home_code = split_mlb_teams_blob(teams_blob)
+
+    away_name = MLB_TEAM_MAP.get(away_code, away_code)
+    home_name = MLB_TEAM_MAP.get(home_code, home_code)
+    sel_name = MLB_TEAM_MAP.get(sel, sel)
+
+    matchup = None
+    if away_code and home_code:
+        matchup = f"{away_name} @ {home_name}"
+
+    return {
+        "series": series,
+        "GameDate": game_date,
+        "GameTime": game_time,
         "Away": away_code,
         "Home": home_code,
         "AwayName": away_name,
