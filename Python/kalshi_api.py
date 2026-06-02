@@ -30,20 +30,41 @@ import requests
 import pandas as pd
 import os
 from datetime import datetime, timezone
-from kalshi_analysis import fix_single_missing_timestamp, parse_kxnflgame_ticker
+from kalshi_analysis import (
+    fix_single_missing_timestamp,
+    parse_kxnflgame_ticker,
+    parse_kxnbagame_ticker,
+)
 
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
+TRADE_COLUMNS = [
+    "count",
+    "created_time",
+    "no_price",
+    "no_price_dollars",
+    "price",
+    "taker_side",
+    "ticker",
+    "trade_id",
+    "yes_price",
+    "yes_price_dollars",
+]
+
 def get_kalshi_series_df(series_ticker="KXNFLGAME", status="open", limit=200):
     """
     Generic function to retrieve markets from a Kalshi series.
+
+    The events endpoint treats limit as page size. Keep it within the endpoint's
+    accepted range; cursor pagination below still retrieves every available page.
     """
+    page_limit = min(int(limit), 200)
 
     params = {
         "series_ticker": series_ticker,
         "with_nested_markets": "true",
-        "limit": str(limit)
+        "limit": str(page_limit)
     }
     if status is not None:
         params["status"] = status
@@ -162,6 +183,28 @@ def get_clean_nfl_games(status="open", limit=200):
 
     return clean_df
 
+
+def get_clean_nba_games(status="open", limit=200):
+    """
+    Pull NBA markets for a given status, parse ticker metadata, and return an enriched DataFrame.
+    """
+    raw_df = get_nba_games_df(status=status, limit=limit)
+
+    if raw_df.empty:
+        print(f"No NBA markets returned for status='{status}'.")
+        return raw_df
+
+    parsed_df = raw_df["Ticker"].apply(parse_kxnbagame_ticker).apply(pd.Series)
+    clean_df = pd.concat([raw_df, parsed_df], axis=1)
+
+    clean_df = clean_df.sort_values(
+        ["GameDate", "Home", "Away", "Ticker"],
+        na_position="last"
+    ).reset_index(drop=True)
+
+    return clean_df
+
+
 def get_market_quotes(ticker: str) -> dict:
     """
     Fetch the latest quote for a single market.
@@ -272,9 +315,7 @@ def get_trades(
             break
 
     if not trades:
-        return pd.DataFrame(
-            columns=["created_time", "yes_price_dollars", "no_price_dollars", "count"]
-        )
+        return pd.DataFrame(columns=TRADE_COLUMNS)
 
     df = pd.json_normalize(trades)
 
@@ -291,7 +332,14 @@ def get_trades(
         df = fix_single_missing_timestamp(df, col="created_time")
 
     # Numeric columns
-    for col in ["yes_price_dollars", "no_price_dollars"]:
+    for col in [
+        "yes_price_dollars",
+        "no_price_dollars",
+        "yes_price",
+        "no_price",
+        "price",
+        "count_fp",
+    ]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -300,8 +348,46 @@ def get_trades(
     else:
         df["count"] = 1
 
+    if "count_fp" in df.columns:
+        df["count"] = df["count_fp"].fillna(df["count"])
+
+    if "yes_price_dollars" in df.columns:
+        yes_price = (df["yes_price_dollars"] * 100).round()
+        if "yes_price" in df.columns:
+            df["yes_price"] = df["yes_price"].fillna(yes_price)
+        else:
+            df["yes_price"] = yes_price
+
+    if "no_price_dollars" in df.columns:
+        no_price = (df["no_price_dollars"] * 100).round()
+        if "no_price" in df.columns:
+            df["no_price"] = df["no_price"].fillna(no_price)
+        else:
+            df["no_price"] = no_price
+
+    if "price" not in df.columns:
+        df["price"] = pd.NA
+
+    if "taker_side" in df.columns:
+        yes_trades = df["taker_side"].str.lower().eq("yes")
+        no_trades = df["taker_side"].str.lower().eq("no")
+        if "yes_price_dollars" in df.columns:
+            df.loc[yes_trades, "price"] = df.loc[yes_trades, "price"].fillna(
+                df.loc[yes_trades, "yes_price_dollars"]
+            )
+        if "no_price_dollars" in df.columns:
+            df.loc[no_trades, "price"] = df.loc[no_trades, "price"].fillna(
+                df.loc[no_trades, "no_price_dollars"]
+            )
+
     # ✅ Final: always sort ascending by time, stable for ties
     df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
+
+    for col in TRADE_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    df = df[TRADE_COLUMNS]
     return df
 
 
@@ -443,6 +529,84 @@ def _nfl_season_from_game_date(game_date) -> int:
     return game_date.year if game_date.month >= 8 else game_date.year - 1
 
 
+def _nba_season_from_game_date(game_date) -> int:
+    """Return the NBA season for a game date."""
+    game_date = pd.to_datetime(game_date)
+    return game_date.year if game_date.month >= 10 else game_date.year - 1
+
+
+SPORT_TRADE_CONFIG = {
+    "NFL": {
+        "get_clean_games": get_clean_nfl_games,
+        "season_from_date": _nfl_season_from_game_date,
+    },
+    "NBA": {
+        "get_clean_games": get_clean_nba_games,
+        "season_from_date": _nba_season_from_game_date,
+    },
+}
+
+
+def LoadMissingTrades(
+    sport: str,
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports",
+    status: str = "settled",
+    limit: int = 200
+):
+    """
+    Load trades for games in a sport/season that lack saved trade files.
+
+    Files are stored under a per-season subdirectory:
+    ``{base_path}\\{sport}{season}``, for example
+    ``E:\\PredMktData\\TradeExports\\NBA2025``.
+    """
+    sport = sport.upper()
+    if sport not in SPORT_TRADE_CONFIG:
+        valid_sports = ", ".join(sorted(SPORT_TRADE_CONFIG))
+        raise ValueError(f"Unsupported sport '{sport}'. Valid sports: {valid_sports}")
+
+    config = SPORT_TRADE_CONFIG[sport]
+    error_columns = ["Ticker", "Error"]
+    trade_path = os.path.join(base_path, f"{sport}{season}")
+    os.makedirs(trade_path, exist_ok=True)
+
+    games = config["get_clean_games"](status=status, limit=limit)
+    if games.empty:
+        print(f"No {status} {sport} games returned for season {season}.")
+        return pd.DataFrame(columns=error_columns)
+
+    games = games.copy()
+    games["Season"] = games["GameDate"].apply(config["season_from_date"])
+    df_season = games.loc[
+        games["Season"] == season,
+        ["Ticker"]
+    ]
+
+    if df_season.empty:
+        print(f"No {status} {sport} games found for season {season}.")
+        return pd.DataFrame(columns=error_columns)
+
+    df_trade = GetTradeFiles(trade_path)
+    df_load = df_season[~df_season["Ticker"].isin(df_trade["Ticker"])]
+
+    if df_load.empty:
+        print(f"No missing {sport} trade files for season {season}.")
+        return pd.DataFrame(columns=error_columns)
+
+    error_log = []
+    for ticker in df_load["Ticker"]:
+        print(f"\nProcessing {ticker}...")
+        try:
+            GetUnsavedTrades(ticker, save_path=trade_path)
+        except Exception as e:
+            err_msg = str(e)
+            print(f"Error processing {ticker}: {err_msg}")
+            error_log.append({"Ticker": ticker, "Error": err_msg})
+
+    return pd.DataFrame(error_log, columns=error_columns)
+
+
 def LoadMissingNFLTrades(
     season: int,
     base_path: str = r"E:\PredMktData\TradeExports"
@@ -463,52 +627,15 @@ def LoadMissingNFLTrades(
 
         If no errors occur, returns an empty DataFrame.
     """
-    error_columns = ["Ticker", "Error"]
-    trade_path = os.path.join(base_path, f"NFL{season}")
-    os.makedirs(trade_path, exist_ok=True)
+    return LoadMissingTrades("NFL", season, base_path=base_path)
 
-    # 1. Get settled games
-    settled_games = get_clean_nfl_games(status="settled")  # Games where contracts have settled
-    if settled_games.empty:
-        print(f"No settled NFL games returned for season {season}.")
-        return pd.DataFrame(columns=error_columns)
 
-    settled_games = settled_games.copy()
-    settled_games["Season"] = settled_games["GameDate"].apply(_nfl_season_from_game_date)
-    df_settled = settled_games.loc[
-        settled_games["Season"] == season,
-        ["Ticker"]
-    ]
-
-    if df_settled.empty:
-        print(f"No settled NFL games found for season {season}.")
-        return pd.DataFrame(columns=error_columns)
-
-    # 2. Get list of already-downloaded trade files
-    df_trade = GetTradeFiles(trade_path)
-
-    # 3. Find which settled games do NOT yet have a trade file
-    df_load = df_settled[~df_settled["Ticker"].isin(df_trade["Ticker"])]
-
-    if df_load.empty:
-        print(f"No missing NFL trade files for season {season}.")
-        return pd.DataFrame(columns=error_columns)
-
-    # 4. Loop through missing tickers and try to load trades
-    error_log = []  # list of dicts: {"Ticker": ..., "Error": ...}
-
-    for ticker in df_load["Ticker"]:
-        print(f"\nProcessing {ticker}...")
-        try:
-            GetUnsavedTrades(ticker, save_path=trade_path)
-        except Exception as e:
-            err_msg = str(e)
-            print(f"❌ Error processing {ticker}: {err_msg}")
-            error_log.append({"Ticker": ticker, "Error": err_msg})
-
-    # 5. Return a DataFrame of errors (or an empty one if none)
-    errors_df = pd.DataFrame(error_log, columns=error_columns)
-    return errors_df
+def LoadMissingNBATrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
+    """Load missing NBA trade files for a season."""
+    return LoadMissingTrades("NBA", season, base_path=base_path)
 
 
 def _to_unix_utc(dt) -> int:
