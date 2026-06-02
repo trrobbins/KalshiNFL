@@ -34,6 +34,7 @@ from kalshi_analysis import (
     fix_single_missing_timestamp,
     parse_kxnflgame_ticker,
     parse_kxnbagame_ticker,
+    parse_kxnhlgame_ticker,
 )
 
 
@@ -160,6 +161,10 @@ def get_nba_games_df(status="open", limit=200):
     """Wrapper for Professional Basketball (NBA) game markets."""
     return get_kalshi_series_df(series_ticker="KXNBAGAME", status=status, limit=limit)
 
+def get_nhl_games_df(status="open", limit=200):
+    """Wrapper for Professional Hockey (NHL) game markets."""
+    return get_kalshi_series_df(series_ticker="KXNHLGAME", status=status, limit=limit)
+
 def get_clean_nfl_games(status="open", limit=200):
     """
     Pull NFL markets for a given status, parse ticker metadata, and return an enriched DataFrame.
@@ -195,6 +200,27 @@ def get_clean_nba_games(status="open", limit=200):
         return raw_df
 
     parsed_df = raw_df["Ticker"].apply(parse_kxnbagame_ticker).apply(pd.Series)
+    clean_df = pd.concat([raw_df, parsed_df], axis=1)
+
+    clean_df = clean_df.sort_values(
+        ["GameDate", "Home", "Away", "Ticker"],
+        na_position="last"
+    ).reset_index(drop=True)
+
+    return clean_df
+
+
+def get_clean_nhl_games(status="open", limit=200):
+    """
+    Pull NHL markets for a given status, parse ticker metadata, and return an enriched DataFrame.
+    """
+    raw_df = get_nhl_games_df(status=status, limit=limit)
+
+    if raw_df.empty:
+        print(f"No NHL markets returned for status='{status}'.")
+        return raw_df
+
+    parsed_df = raw_df["Ticker"].apply(parse_kxnhlgame_ticker).apply(pd.Series)
     clean_df = pd.concat([raw_df, parsed_df], axis=1)
 
     clean_df = clean_df.sort_values(
@@ -535,6 +561,12 @@ def _nba_season_from_game_date(game_date) -> int:
     return game_date.year if game_date.month >= 10 else game_date.year - 1
 
 
+def _nhl_season_from_game_date(game_date) -> int:
+    """Return the NHL season for a game date."""
+    game_date = pd.to_datetime(game_date)
+    return game_date.year if game_date.month >= 10 else game_date.year - 1
+
+
 SPORT_TRADE_CONFIG = {
     "NFL": {
         "get_clean_games": get_clean_nfl_games,
@@ -543,6 +575,10 @@ SPORT_TRADE_CONFIG = {
     "NBA": {
         "get_clean_games": get_clean_nba_games,
         "season_from_date": _nba_season_from_game_date,
+    },
+    "NHL": {
+        "get_clean_games": get_clean_nhl_games,
+        "season_from_date": _nhl_season_from_game_date,
     },
 }
 
@@ -636,6 +672,14 @@ def LoadMissingNBATrades(
 ):
     """Load missing NBA trade files for a season."""
     return LoadMissingTrades("NBA", season, base_path=base_path)
+
+
+def LoadMissingNHLTrades(
+    season: int,
+    base_path: str = r"E:\PredMktData\TradeExports"
+):
+    """Load missing NHL trade files for a season."""
+    return LoadMissingTrades("NHL", season, base_path=base_path)
 
 
 def _to_unix_utc(dt) -> int:
