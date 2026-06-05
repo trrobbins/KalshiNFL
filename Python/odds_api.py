@@ -129,6 +129,14 @@ def get_odds_df(
             df["market_last_update"], utc=True, errors="coerce"
         )
 
+    current_time = pd.Timestamp.now(tz="UTC")
+    df["current_time"] = current_time
+    if "commence_time" in df.columns:
+        df["status"] = "Live"
+        df.loc[current_time < df["commence_time"], "status"] = "Pending"
+    else:
+        df["status"] = pd.NA
+
     df.attrs["x_requests_remaining"] = _header_int(
         response.headers, "x-requests-remaining"
     )
