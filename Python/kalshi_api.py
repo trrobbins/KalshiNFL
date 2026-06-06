@@ -632,10 +632,22 @@ def get_historical_cfb_games_df(limit: int = 500) -> pd.DataFrame:
     """Wrapper for historical college football game markets."""
     return get_historical_markets_by_series(series_ticker="KXNCAAFGAME", limit=limit)
 
+def get_historical_nba_games_df(limit: int = 500) -> pd.DataFrame:
+    """Wrapper for historical NBA game markets."""
+    return get_historical_markets_by_series(series_ticker="KXNBAGAME", limit=limit)
 
-def get_nfl_historical_games_df(limit: int = 500) -> pd.DataFrame:
-    """Backward-compatible alias for get_historical_nfl_games_df."""
-    return get_historical_nfl_games_df(limit=limit)
+def get_historical_nhl_games_df(limit: int = 500) -> pd.DataFrame:
+    """Wrapper for historical NHL game markets."""
+    return get_historical_markets_by_series(series_ticker="KXNHLGAME", limit=limit)
+
+def get_historical_mlb_games_df(limit: int = 500) -> pd.DataFrame:
+    """Wrapper for historical MLB game markets."""
+    return get_historical_markets_by_series(series_ticker="KXMLBGAME", limit=limit)
+
+
+#def get_nfl_historical_games_df(limit: int = 500) -> pd.DataFrame:
+#    """Backward-compatible alias for get_historical_nfl_games_df."""
+#    return get_historical_nfl_games_df(limit=limit)
 
 
 def get_historical_trades(
@@ -677,14 +689,78 @@ def get_historical_trades(
             break
 
     if not trades:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=TRADE_COLUMNS)
 
     df = pd.json_normalize(trades)
 
-    if "created_time" in df.columns:
-        df["created_time"] = pd.to_datetime(df["created_time"], utc=True, errors="coerce")
-        df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
+    if "created_time" not in df.columns:
+        df["created_time"] = pd.NaT
 
+    df["created_time"] = pd.to_datetime(df["created_time"], utc=True, errors="coerce")
+
+    if "taker_side" not in df.columns and "taker_outcome_side" in df.columns:
+        df["taker_side"] = df["taker_outcome_side"]
+    elif "taker_side" in df.columns and "taker_outcome_side" in df.columns:
+        taker_side = df["taker_side"].astype("string").str.lower()
+        if not taker_side.isin(["yes", "no"]).any():
+            df["taker_side"] = df["taker_outcome_side"]
+
+    for col in [
+        "yes_price_dollars",
+        "no_price_dollars",
+        "yes_price",
+        "no_price",
+        "price",
+        "count_fp",
+    ]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "count" in df.columns:
+        df["count"] = pd.to_numeric(df["count"], errors="coerce")
+    else:
+        df["count"] = 1
+
+    if "count_fp" in df.columns:
+        df["count"] = df["count_fp"].fillna(df["count"])
+
+    if "yes_price_dollars" in df.columns:
+        yes_price = (df["yes_price_dollars"] * 100).round()
+        if "yes_price" in df.columns:
+            df["yes_price"] = df["yes_price"].fillna(yes_price)
+        else:
+            df["yes_price"] = yes_price
+
+    if "no_price_dollars" in df.columns:
+        no_price = (df["no_price_dollars"] * 100).round()
+        if "no_price" in df.columns:
+            df["no_price"] = df["no_price"].fillna(no_price)
+        else:
+            df["no_price"] = no_price
+
+    if "price" not in df.columns:
+        df["price"] = float("nan")
+
+    if "taker_side" in df.columns:
+        taker_side = df["taker_side"].astype("string").str.lower()
+        yes_trades = taker_side.eq("yes")
+        no_trades = taker_side.eq("no")
+        if "yes_price_dollars" in df.columns:
+            df.loc[yes_trades, "price"] = df.loc[yes_trades, "price"].fillna(
+                df.loc[yes_trades, "yes_price_dollars"]
+            )
+        if "no_price_dollars" in df.columns:
+            df.loc[no_trades, "price"] = df.loc[no_trades, "price"].fillna(
+                df.loc[no_trades, "no_price_dollars"]
+            )
+
+    df = df.sort_values("created_time", kind="mergesort").reset_index(drop=True)
+
+    for col in TRADE_COLUMNS:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    df = df[TRADE_COLUMNS]
     return df
 
 
