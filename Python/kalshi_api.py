@@ -372,6 +372,34 @@ def get_game_winners(get_clean_games, limit=200):
     return build_game_winner_df(games)
 
 
+def get_nfl_winner(limit=200):
+    """
+    Return settled NFL game winners in one-row-per-game format.
+    """
+    return get_game_winners(get_clean_nfl_games, limit=limit)
+
+
+def get_cfb_winner(limit=200):
+    """
+    Return settled college football game winners in one-row-per-game format.
+    """
+    return get_game_winners(get_clean_cfb_games, limit=limit)
+
+
+def get_nba_winner(limit=200):
+    """
+    Return settled NBA game winners in one-row-per-game format.
+    """
+    return get_game_winners(get_clean_nba_games, limit=limit)
+
+
+def get_nhl_winner(limit=200):
+    """
+    Return settled NHL game winners in one-row-per-game format.
+    """
+    return get_game_winners(get_clean_nhl_games, limit=limit)
+
+
 def get_mlb_winner(limit=200):
     """
     Return settled MLB game winners in one-row-per-game format.
