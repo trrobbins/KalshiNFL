@@ -276,6 +276,109 @@ def get_clean_mlb_games(status="open", limit=200):
     return clean_df
 
 
+def _price_equals(series, target):
+    """Compare price columns after numeric coercion."""
+    return pd.to_numeric(series, errors="coerce").round(4).eq(target)
+
+
+def _matchup_ticker(ticker):
+    """Return the game-level ticker without the team selection suffix."""
+    if pd.isna(ticker):
+        return pd.NA
+
+    parts = str(ticker).rsplit("-", 1)
+    if len(parts) == 2:
+        return parts[0]
+    return str(ticker)
+
+
+def _select_game_team(group, candidate_mask, role):
+    """
+    Pick one team selection from a game-level group.
+
+    Settled markets can leave both rows with boundary bid/ask values, so use
+    LastPrice as a tiebreaker when the requested boundary rule is not unique.
+    """
+    candidates = group.loc[candidate_mask & group["Selection"].notna()].copy()
+
+    if candidates.empty:
+        return pd.NA
+
+    unique_selections = candidates["Selection"].dropna().unique()
+    if len(unique_selections) == 1:
+        return unique_selections[0]
+
+    if "LastPrice" not in candidates.columns:
+        raise ValueError(
+            f"Could not determine {role}; multiple selections match and LastPrice is unavailable."
+        )
+
+    candidates["_LastPrice"] = pd.to_numeric(candidates["LastPrice"], errors="coerce")
+    ascending = role == "loser"
+    candidates = candidates.sort_values("_LastPrice", ascending=ascending)
+
+    return candidates.iloc[0]["Selection"]
+
+
+def build_game_winner_df(games_df):
+    """
+    Convert team-level Kalshi game markets into one winner/loser row per game.
+    """
+    output_columns = ["Event", "Ticker", "GameDate", "winner", "loser"]
+    if games_df.empty:
+        return pd.DataFrame(columns=output_columns)
+
+    required_columns = {"Event", "Ticker", "GameDate", "Away", "Home", "Selection", "YesAsk", "YesBid"}
+    missing_columns = required_columns - set(games_df.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Input games DataFrame is missing required columns: {missing}")
+
+    df = games_df.copy()
+    df["GameDate"] = pd.to_datetime(df["GameDate"], errors="coerce").dt.normalize()
+    df["MatchupTicker"] = df["Ticker"].apply(_matchup_ticker)
+
+    group_columns = ["MatchupTicker", "GameDate", "Away", "Home"]
+    if "GameTime" in df.columns:
+        group_columns.append("GameTime")
+
+    rows = []
+    for _, group in df.groupby(group_columns, dropna=False, sort=True):
+        winner = _select_game_team(group, _price_equals(group["YesAsk"], 1), "winner")
+        loser = _select_game_team(group, _price_equals(group["YesBid"], 0), "loser")
+
+        rows.append({
+            "Event": group["Event"].dropna().iloc[0] if group["Event"].notna().any() else pd.NA,
+            "Ticker": group["MatchupTicker"].dropna().iloc[0] if group["MatchupTicker"].notna().any() else pd.NA,
+            "GameDate": group["GameDate"].dropna().iloc[0] if group["GameDate"].notna().any() else pd.NaT,
+            "winner": winner,
+            "loser": loser,
+        })
+
+    result = pd.DataFrame(rows, columns=output_columns).sort_values(
+        ["GameDate", "Event"],
+        na_position="last",
+    ).reset_index(drop=True)
+
+    result["GameDate"] = result["GameDate"].dt.date
+    return result
+
+
+def get_game_winners(get_clean_games, limit=200):
+    """
+    Generic wrapper for settled Kalshi game winner results.
+    """
+    games = get_clean_games(status="settled", limit=limit)
+    return build_game_winner_df(games)
+
+
+def get_mlb_winner(limit=200):
+    """
+    Return settled MLB game winners in one-row-per-game format.
+    """
+    return get_game_winners(get_clean_mlb_games, limit=limit)
+
+
 def get_market_quotes(ticker: str) -> dict:
     """
     Fetch the latest quote for a single market.
