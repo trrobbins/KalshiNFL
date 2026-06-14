@@ -83,7 +83,7 @@ NCAAF_TEAM_MAP = {
     "ISU": "Iowa State", "JMU": "James Madison", "KAN": "Kansas",
     "KSU": "Kansas State", "LSU": "LSU", "LOU": "Louisville",
     "MICH": "Michigan", "MINN": "Minnesota", "MISS": "Ole Miss",
-    "MIZ": "Missouri", "MSST": "Mississippi State", "NAVY": "Navy",
+    "M-OH": "Miami (OH)", "MIZ": "Missouri", "MSST": "Mississippi State", "NAVY": "Navy",
     "NCST": "NC State", "NEB": "Nebraska", "ND": "Notre Dame",
     "NW": "Northwestern", "OHIO": "Ohio", "OKLA": "Oklahoma",
     "OKST": "Oklahoma State", "ORE": "Oregon", "OSU": "Ohio State",
@@ -91,7 +91,7 @@ NCAAF_TEAM_MAP = {
     "RUTG": "Rutgers", "SC": "South Carolina", "SMU": "SMU",
     "STAN": "Stanford", "SYR": "Syracuse", "TCU": "TCU",
     "TENN": "Tennessee", "TEX": "Texas", "TULN": "Tulane",
-    "TTU": "Texas Tech", "UCF": "UCF", "UCLA": "UCLA",
+    "TTU": "Texas Tech", "UCF": "UCF", "UCLA": "UCLA", "FRES": "Fresno State",
     "UNC": "North Carolina", "UNLV": "UNLV", "USC": "USC",
     "USF": "South Florida", "UTAH": "Utah", "UTSA": "UTSA",
     "UVA": "Virginia", "VT": "Virginia Tech", "WAKE": "Wake Forest",
@@ -149,6 +149,9 @@ def split_mlb_teams_blob(blob: str):
             home_candidate = blob[len(away):]
             if home_candidate in MLB_VALID_CODES:
                 return away, home_candidate
+    if len(blob) % 2 == 0:
+        mid = len(blob) // 2
+        return blob[:mid], blob[mid:]
     return None, None
 
 
@@ -171,6 +174,18 @@ def split_ncaaf_teams_blob(blob: str):
         return blob[:mid], blob[mid:]
 
     return None, None
+
+
+def split_ncaaf_body_and_selection(body: str):
+    """
+    Split the post-date CFB ticker body into matchup blob and selection code.
+    """
+    for sel in NCAAF_VALID_CODES:
+        suffix = f"-{sel}"
+        if body.endswith(suffix):
+            return body[:-len(suffix)], sel
+
+    return body, None
 
 
 def parse_kxnflgame_ticker(ticker: str):
@@ -243,6 +258,7 @@ def parse_kxncaafgame_ticker(ticker: str):
     Parse Kalshi college football tickers like:
       KXNCAAFGAME-26AUG29UNCTCU
       KXNCAAFGAME-26AUG29UNCTCU-TCU
+      KXNCAAFGAME-25DEC27M-OHFRES-M-OH
 
     Returns dict with:
       series
@@ -258,15 +274,15 @@ def parse_kxncaafgame_ticker(ticker: str):
         r"(\d{2})"
         r"([A-Z]{3})"
         r"(\d{2})"
-        r"([A-Z]+)"
-        r"(?:-([A-Z]{2,4}))?",
+        r"([A-Z-]+)",
         ticker,
     )
 
     if not m:
         raise ValueError(f"Unrecognized ticker format: {ticker}")
 
-    series, yy, mon, dd, teams_blob, sel = m.groups()
+    series, yy, mon, dd, body = m.groups()
+    teams_blob, sel = split_ncaaf_body_and_selection(body)
 
     month_num = datetime.strptime(mon, "%b").month
     year_full = 2000 + int(yy)
@@ -412,11 +428,14 @@ def parse_kxmlbgame_ticker(ticker: str):
     Parse Kalshi MLB tickers like:
       KXMLBGAME-26JUN021840DETTB
       KXMLBGAME-26JUN021840DETTB-TB
+      KXMLBGAME-25OCT31LADTOR-TOR
+      KXMLBGAME-25OCT14NLLSNLHS-NLLS
+      KXMLBGAME-25SEP20CLEMING2-MIN
 
     Returns dict with:
       series
       GameDate (YYYY-MM-DD)
-      GameTime (HH:MM from the ticker's four-digit time block)
+      GameTime (HH:MM from the ticker's four-digit time block, if present)
       Away, Home
       AwayName, HomeName
       Selection, SelectionName
@@ -428,9 +447,9 @@ def parse_kxmlbgame_ticker(ticker: str):
         r"(\d{2})"
         r"([A-Z]{3})"
         r"(\d{2})"
-        r"(\d{4})"
-        r"([A-Z]+)"
-        r"(?:-([A-Z]{2,3}))?",
+        r"(\d{4})?"
+        r"([A-Z]+\d*)"
+        r"(?:-([A-Z]{2,4}))?",
         ticker,
     )
 
@@ -442,7 +461,8 @@ def parse_kxmlbgame_ticker(ticker: str):
     month_num = datetime.strptime(mon, "%b").month
     year_full = 2000 + int(yy)
     game_date = f"{year_full:04d}-{month_num:02d}-{int(dd):02d}"
-    game_time = f"{hhmm[:2]}:{hhmm[2:]}"
+    game_time = f"{hhmm[:2]}:{hhmm[2:]}" if hhmm else None
+    teams_blob = re.sub(r"G?\d+$", "", teams_blob)
 
     away_code, home_code = split_mlb_teams_blob(teams_blob)
 
