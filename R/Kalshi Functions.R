@@ -1042,7 +1042,7 @@ GetCombinedProbs <- function(FRgame, team = "Home", type = 'Vegas', LiveOnly = T
 }
 
 
-PlotGameProbs <- function (GameProbs){
+PlotGameProbs <- function (GameProbs, Save = TRUE){
   
   # This function will plot multiple probability series for a game
   
@@ -1050,7 +1050,7 @@ PlotGameProbs <- function (GameProbs){
   myTeam <- GameProbs$team[1]
   myMatchup <- GetMatchupName (myGameID, ticker=FALSE)
   
-  GameProbs %>%
+  plot <- GameProbs %>%
     ggplot(aes(
       x = date_time,
       y = wp,
@@ -1088,6 +1088,7 @@ PlotGameProbs <- function (GameProbs){
       title = str_c( "In Game Win Probability Comparison - ",myTeam),
       #subtitle = "FastR Vegas model vs. Kalshi market-implied probability",
       subtitle = myMatchup,
+      caption = myGameID,
       x = "Time",
       y = "Win Probability",
       color = "Source",
@@ -1099,6 +1100,11 @@ PlotGameProbs <- function (GameProbs){
       plot.subtitle = element_text(color = "gray40"),
       legend.position = "bottom"
     )
+  
+  print (plot)
+  if (Save == TRUE){
+    SavePlotToFile(plot, "Game Probs")
+  }
 }
 
 GetGameWinners <- function (Year = 2025){
@@ -1113,5 +1119,21 @@ GetGameWinners <- function (Year = 2025){
   return (gamewinners)
   
 }
+
+PlotRandomGameProbs <- function (Save = TRUE){
+  
+  # This function will plot the vegasWP and Kalsh win probs for a random game
+  
+  RandomGameId <- games %>%
+    slice_sample(n = 1) %>%
+    pull(game_id)
+  
+  #ProbCombo<- GetCombinedProbs (RandomGameId , team = "Away" , type = 'WP')
+  ProbCombo<- GetCombinedProbs (RandomGameId , team = "Away" , type = 'Vegas')
+  PlotGameProbs(ProbCombo, Save)
+  
+  
+}
+
 
 
